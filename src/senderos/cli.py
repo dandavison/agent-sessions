@@ -1,10 +1,11 @@
 """The senderos command line."""
 
 import sys
+import time
 
 import click
 
-from senderos import db, render
+from senderos import db, index, render
 from senderos.render import Format, Renderer
 from senderos.wormhole import WormholeUnavailable
 
@@ -61,6 +62,36 @@ def main() -> None:
 
 
 @main.command()
+@click.option(
+    "--agent",
+    "agents",
+    multiple=True,
+    type=click.Choice(sorted(index.SOURCES)),
+    help="Only read this agent's transcripts. Repeatable. Defaults to all.",
+)
+@format_option
+def sync(agents: tuple[str, ...], fmt: str | None, as_json: bool, quiet: bool) -> None:
+    """Bring the index into line with the transcript files. Safe to re-run.
+
+    The only command that writes. Reads every transcript, so it takes about a
+    second and there is nothing to keep incrementally correct.
+    """
+    out = renderer(fmt, as_json, quiet)
+    conn = db.connect()
+    result = index.sync(conn, list(agents) or None)
+    out.record(
+        {
+            "indexed": result.indexed,
+            "nodes": result.nodes,
+            "skipped": result.skipped,
+            "duplicated": result.duplicated,
+            "forgotten": result.forgotten,
+        }
+    )
+    out.hint("Use `senderos search <query>` to find one.")
+
+
+@main.command()
 @format_option
 def status(fmt: str | None, as_json: bool, quiet: bool) -> None:
     """Report index health: sendero counts, and whether a sync is due."""
@@ -70,15 +101,28 @@ def status(fmt: str | None, as_json: bool, quiet: bool) -> None:
     by_agent = conn.execute(
         "SELECT agent, count(*) AS n FROM sendero GROUP BY agent ORDER BY n DESC"
     ).fetchall()
+    changed = index.stale(conn)
     out.record(
         {
             "db": str(db.DB_PATH),
             "senderos": total,
             **{row["agent"]: row["n"] for row in by_agent},
+            "synced_at": _ago(db.synced_at(conn)),
+            "changed_since": changed,
         }
     )
-    if not total:
-        out.hint("Run `senderos sync` to build the index.")
+    if changed:
+        out.hint(f"{changed} transcripts have changed. Run `senderos sync`.")
+
+
+def _ago(when: int | None) -> str:
+    if when is None:
+        return "never"
+    seconds = int(time.time()) - when
+    for size, unit in ((86400, "d"), (3600, "h"), (60, "m")):
+        if seconds >= size:
+            return f"{seconds // size}{unit} ago"
+    return "just now"
 
 
 def run() -> int:

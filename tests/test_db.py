@@ -42,13 +42,6 @@ def test_write_sendero_round_trips_bools(tmp_path: Path) -> None:
     assert conn.execute("SELECT is_sidechain FROM sendero").fetchone()[0] == 1
 
 
-def test_known_mtimes_reports_what_was_last_read(tmp_path: Path) -> None:
-    conn = db.connect(tmp_path / "index.db")
-    db.write_sendero(conn, make_sendero(file_mtime=5))
-    db.write_sendero(conn, make_sendero(id="claude:b", path="/t/b.jsonl", file_mtime=9))
-    assert db.known_mtimes(conn) == {"/t/a.jsonl": 5, "/t/b.jsonl": 9}
-
-
 def test_forget_cascades(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "index.db")
     db.write_sendero(conn, make_sendero())
@@ -166,3 +159,17 @@ def test_silent_nodes_never_match_search(tmp_path: Path) -> None:
     assert conn.execute("SELECT count(*) FROM node").fetchone()[0] == 2
     hits = conn.execute("SELECT rowid FROM node_fts WHERE node_fts MATCH ?", ("find",)).fetchall()
     assert len(hits) == 1
+
+
+def test_synced_at_starts_unset_and_round_trips(tmp_path: Path) -> None:
+    conn = db.connect(tmp_path / "index.db")
+    assert db.synced_at(conn) is None
+    db.set_synced_at(conn, 1785600000)
+    assert db.synced_at(conn) == 1785600000
+
+
+def test_indexed_paths_lists_every_transcript(tmp_path: Path) -> None:
+    conn = db.connect(tmp_path / "index.db")
+    db.write_sendero(conn, make_sendero())
+    db.write_sendero(conn, make_sendero(id="claude:b", path="/t/b.jsonl"))
+    assert db.indexed_paths(conn) == {"/t/a.jsonl", "/t/b.jsonl"}

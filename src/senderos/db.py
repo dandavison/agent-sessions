@@ -11,6 +11,8 @@ SCHEMA_VERSION = 1
 DB_PATH = Path.home() / ".senderos" / "index.db"
 
 SCHEMA = """
+CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+
 CREATE TABLE sendero (
   id             TEXT PRIMARY KEY,
   agent          TEXT NOT NULL,
@@ -105,12 +107,17 @@ def _rebuild(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def known_mtimes(conn: sqlite3.Connection) -> dict[str, int]:
-    """Transcript path -> its mtime when last read, so `status` can spot a stale index."""
-    return {
-        row["path"]: row["file_mtime"]
-        for row in conn.execute("SELECT path, file_mtime FROM sendero")
-    }
+def indexed_paths(conn: sqlite3.Connection) -> set[str]:
+    return {row["path"] for row in conn.execute("SELECT path FROM sendero")}
+
+
+def synced_at(conn: sqlite3.Connection) -> int | None:
+    row = conn.execute("SELECT value FROM meta WHERE key = 'synced_at'").fetchone()
+    return int(row["value"]) if row else None
+
+
+def set_synced_at(conn: sqlite3.Connection, when: int) -> None:
+    conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('synced_at', ?)", (str(when),))
 
 
 def write_sendero(conn: sqlite3.Connection, s: Sendero) -> None:
