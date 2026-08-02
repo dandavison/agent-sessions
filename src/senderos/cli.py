@@ -8,7 +8,7 @@ from pathlib import Path
 
 import click
 
-from senderos import db, index, query, render, topology, wormhole
+from senderos import db, index, query, render, skill, topology, wormhole
 from senderos.render import Format, Renderer
 from senderos.wormhole import WormholeUnavailable
 
@@ -132,7 +132,9 @@ def filter_options(f):
             ),
             click.option("--since", help="Only senderos touched within e.g. 36h, 10d, 2w."),
             click.option("--min-context", help="Only senderos whose context reached e.g. 500k."),
-            click.option("-n", "--limit", type=int, default=20, show_default=True),
+            click.option(
+                "-n", "--limit", type=int, default=20, show_default=True, help="How many at most."
+            ),
         ]
     ):
         f = option(f)
@@ -167,7 +169,13 @@ def search(query_text, project, agent, since, min_context, limit, fmt, as_json, 
 
 @main.command(name="ls")
 @filter_options
-@click.option("--sort", type=click.Choice(sorted(query.SORTS)), default="recent", show_default=True)
+@click.option(
+    "--sort",
+    type=click.Choice(sorted(query.SORTS)),
+    default="recent",
+    show_default=True,
+    help="Order by recency, peak context, or number of turns.",
+)
 @format_option
 def list_senderos(project, agent, since, min_context, limit, sort, fmt, as_json, quiet) -> None:
     """List senderos, most recent first. No text matching; use `search` for that."""
@@ -312,6 +320,26 @@ def resume(id: str, fork: bool, fmt: str | None, as_json: bool, quiet: bool) -> 
     )
     if running and not fork:
         out.hint(f"It was already running ({running}); wormhole focused its pane.")
+
+
+@main.group(name="skills")
+def skills_group() -> None:
+    """Manage the senderos skill, so an agent knows this tool from turn one."""
+
+
+@skills_group.command(name="add")
+@format_option
+def skills_add(fmt: str | None, as_json: bool, quiet: bool) -> None:
+    """Install the skill into ~/.agents/skills. Symlink from elsewhere if wanted."""
+    out = renderer(fmt, as_json, quiet)
+    path = skill.install()
+    out.record({"path": str(path), "bytes": path.stat().st_size})
+
+
+@skills_group.command(name="preview")
+def skills_preview() -> None:
+    """Print the skill without installing it."""
+    sys.stdout.write(skill.generate())
 
 
 def _resolve(conn: sqlite3.Connection, id: str) -> dict:
