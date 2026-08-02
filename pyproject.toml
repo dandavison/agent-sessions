@@ -1,0 +1,37 @@
+[project]
+name = "senderos"
+version = "0.1.0"
+description = "Index and resume the work done with coding agents"
+readme = "README.md"
+authors = [
+    { name = "Dan Davison", email = "dandavison7@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "click>=8.4.2",
+    "httpx>=0.28.1",
+    "orjson>=3.11.9",
+]
+
+[project.scripts]
+senderos = "senderos.cli:run"
+
+[build-system]
+requires = ["uv_build>=0.12.0,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.1",
+    "ty>=0.0.65",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
