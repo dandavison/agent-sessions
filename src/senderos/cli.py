@@ -3,10 +3,12 @@
 import sqlite3
 import sys
 import time
+from dataclasses import asdict
+from pathlib import Path
 
 import click
 
-from senderos import db, index, query, render
+from senderos import db, index, query, render, topology
 from senderos.render import Format, Renderer
 from senderos.wormhole import WormholeUnavailable
 
@@ -52,7 +54,8 @@ Examples
   $ senderos search "worktree relocation" -p wormhole
   $ senderos ls -p temporal --since 2w
   $ senderos show claude:7e90a7c6 --turns
-  $ senderos resume claude:7e90a7c6
+  $ senderos tree claude:7e90a7c6
+  $ senderos cat claude:7e90a7c6 --tools
 """,
 )
 @click.version_option()
@@ -196,6 +199,84 @@ def show(id: str, turns_only: bool, fmt: str | None, as_json: bool, quiet: bool)
         out.line("")
     out.table([_turn(t) for t in said], quiet_key="uuid")
     out.hint(f"`senderos resume {sendero['id']}` to pick it up.")
+
+
+@main.command()
+@click.argument("id")
+@format_option
+def tree(id: str, fmt: str | None, as_json: bool, quiet: bool) -> None:
+    """Show where a sendero branched, where it was compacted, and what forked off it.
+
+    Long runs where nothing was decided collapse to one line each, so what is
+    left is the shape. Compaction starts a new root, because the boundary record
+    has no parent — there is no path back across it.
+    """
+    out = renderer(fmt, as_json, quiet)
+    conn = db.connect()
+    sendero = _resolve(conn, id)
+    shape = topology.of(conn, sendero)
+
+    if as_json:
+        out.record({"id": sendero["id"], **asdict(shape)})
+        return
+    out.line(f"{sendero['id']}  {sendero['project'] or '-'}  {sendero['title'] or ''}")
+    if origin := shape.forked_from:
+        out.line(f"  forked from {origin['parent']} at {_short(origin['at_uuid'])}")
+    for i, root in enumerate(shape.roots):
+        _draw(out, root, prefix="", last=i == len(shape.roots) - 1)
+    for fork in shape.forks:
+        out.line(f"  fork → {fork['child']} at {_short(fork['at_uuid'])}")
+
+
+def _draw(out: Renderer, segment: topology.Segment, prefix: str, last: bool) -> None:
+    out.line(prefix + ("└─ " if last else "├─ ") + _describe(segment))
+    below = prefix + ("   " if last else "│  ")
+    for i, child in enumerate(segment.children):
+        _draw(out, child, below, i == len(segment.children) - 1)
+
+
+def _describe(segment: topology.Segment) -> str:
+    if c := segment.compaction:
+        dropped = (c["pre_tokens"] or 0) - (c["post_tokens"] or 0)
+        return (
+            f"compacted ({c['trigger']}) {_tokens(c['pre_tokens'])} → {_tokens(c['post_tokens'])},"
+            f" dropped {_tokens(dropped)}, {c['preserved_count']} kept"
+        )
+    parts = [
+        _date(segment.started_at, with_time=True),
+        _plural(segment.turns, "turn") if segment.turns else _plural(segment.messages, "message"),
+        _tokens(segment.context_tokens),
+        "(abandoned)" if segment.abandoned else "",
+    ]
+    return "  ".join(p for p in parts if p)
+
+
+def _plural(n: int, noun: str) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+def _short(uuid: str | None) -> str:
+    return (uuid or "")[:8]
+
+
+@main.command()
+@click.argument("id")
+@click.option("--tools", is_flag=True, help="Include tool calls and their output.")
+@click.option("--whole", is_flag=True, help="Include branches that were abandoned.")
+def cat(id: str, tools: bool, whole: bool) -> None:
+    """Print a sendero as markdown, read from the transcript itself.
+
+    Not from the index, which holds no tool output: `--tools` is the only way
+    to see what was actually run.
+    """
+    conn = db.connect()
+    sendero = _resolve(conn, id)
+    source = index.SOURCES[sendero["agent"]]
+    path = Path(sendero["path"])
+    if not path.exists():
+        raise click.UsageError(f"{path} is gone. Run `senderos sync`.")
+    for chunk in source.render(path, tools=tools, whole=whole):
+        sys.stdout.write(chunk)
 
 
 def _resolve(conn: sqlite3.Connection, id: str) -> dict:

@@ -11,6 +11,7 @@ point of the index is work I took part in, and nobody talked to those.
 """
 
 from collections import defaultdict
+from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,9 @@ class ClaudeSource:
 
     def ingest(self, path: Path) -> Delta | None:
         return parse(path, _read(path))
+
+    def render(self, path: Path, tools: bool, whole: bool) -> Iterator[str]:
+        return render(_read(path), tools=tools, whole=whole)
 
 
 def _discovered(id: str, path: Path) -> Discovered:
@@ -293,3 +297,53 @@ def _epoch(timestamp: str | None) -> int | None:
     if not timestamp:
         return None
     return int(datetime.fromisoformat(timestamp).timestamp())
+
+
+def render(records: list[dict[str, Any]], tools: bool, whole: bool) -> Iterator[str]:
+    """The transcript as markdown, read from the file rather than the index.
+
+    The index holds no tool output by design, so this is the only way to see
+    what was actually run. By default it follows the live thread; `whole`
+    includes the branches that were abandoned.
+    """
+    nodes = [r for r in records if r.get("type") in NODE_TYPES and r.get("uuid")]
+    if not whole:
+        nodes = _active_branch(nodes, _sidecar_state(records).get("leafUuid"))
+    boundaries = {c.uuid for c in _compactions("", records)}
+
+    for node in nodes:
+        if node["uuid"] in boundaries:
+            yield from _compaction_rule(node)
+        elif text := _text(node):
+            yield f"\n## {_role(node)}\n\n{text}\n"
+        elif tools:
+            yield from _tool_calls(node)
+
+
+def _compaction_rule(node: dict[str, Any]) -> Iterator[str]:
+    meta = node.get("compactMetadata", {})
+    yield f"\n---\n\n*Compacted ({meta.get('trigger')}): "
+    yield f"{meta.get('preTokens', 0):,} → {meta.get('postTokens', 0):,} tokens*\n"
+
+
+def _tool_calls(node: dict[str, Any]) -> Iterator[str]:
+    content = node.get("message", {}).get("content")
+    for block in content if isinstance(content, list) else []:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "tool_use":
+            yield f"\n### {block.get('name')}\n\n```json\n{_json(block.get('input'))}\n```\n"
+        elif block.get("type") == "tool_result":
+            yield f"\n```\n{_result_text(block.get('content'))}\n```\n"
+
+
+def _result_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(b.get("text", "") for b in content if isinstance(b, dict))
+    return ""
+
+
+def _json(value: Any) -> str:
+    return orjson.dumps(value, option=orjson.OPT_INDENT_2).decode()

@@ -18,6 +18,7 @@ from conftest import (
 
 from senderos.models import Delta
 from senderos.sources.claude import ClaudeSource, parse
+from senderos.sources.claude import render as claude_render
 
 SESSION = "7e90a7c6-ce43-4dfd-9d7c-8eb01ac7ccf2"
 
@@ -493,3 +494,53 @@ def test_a_rewind_at_a_silent_node_is_still_a_branch(tmp_path: Path) -> None:
         ],
     )
     assert {n.uuid for n in delta.nodes if n.is_branch_point} == {"a1"}
+
+
+# --- rendering to markdown -------------------------------------------------
+
+
+def rendered(records: list[dict[str, Any]], tools: bool = False, whole: bool = False) -> str:
+    return "".join(claude_render(records, tools=tools, whole=whole))
+
+
+def test_render_prose_as_markdown() -> None:
+    out = rendered(linear())
+    assert "## user\n\nwhy is conform relocating worktrees" in out
+    assert "## assistant\n\nBecause it reconciles submodules." in out
+
+
+def test_render_omits_tools_by_default() -> None:
+    records = [
+        user("u1", None, "list the files"),
+        assistant("a1", "u1", [tool_use()], "req_1"),
+        tool_result("u2", "a1"),
+        last_prompt("u2"),
+    ]
+    assert "ls" not in rendered(records)
+
+
+def test_render_with_tools_shows_the_call_and_its_output() -> None:
+    """The index holds no tool output, so this is the only way to see what ran."""
+    records = [
+        user("u1", None, "list the files"),
+        assistant("a1", "u1", [tool_use()], "req_1"),
+        tool_result("u2", "a1"),
+        last_prompt("u2"),
+    ]
+    out = rendered(records, tools=True)
+    assert "### Bash" in out
+    assert '"command": "ls"' in out
+    assert "a\nb" in out
+
+
+def test_render_follows_the_live_branch() -> None:
+    assert "abandoned question" not in rendered(branched())
+
+
+def test_render_whole_includes_abandoned_branches() -> None:
+    assert "abandoned question" in rendered(branched(), whole=True)
+
+
+def test_render_marks_a_compaction() -> None:
+    out = rendered(compacted())
+    assert "*Compacted (auto): 1,000,823 → 22,191 tokens*" in out
