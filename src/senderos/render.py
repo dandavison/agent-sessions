@@ -95,24 +95,47 @@ class Renderer:
         if not rows:
             print("(none)")
             return
-        columns = list(rows[0])
-        budget = _column_budget(len(columns))
-        cells = [[_cell(row.get(c), truncate=True, limit=budget) for c in columns] for row in rows]
-        widths = [
-            max(len(c.upper()), *(len(row[i]) for row in cells)) for i, c in enumerate(columns)
-        ]
-        print("  ".join(c.upper().ljust(w) for c, w in zip(columns, widths, strict=True)).rstrip())
-        for row in cells:
-            print("  ".join(v.ljust(w) for v, w in zip(row, widths, strict=True)).rstrip())
+        columns = [c.upper() for c in rows[0]]
+        cells = [[_cell(v) for v in row.values()] for row in rows]
+        widths = _fit(
+            [max(len(c), *(len(row[i]) for row in cells)) for i, c in enumerate(columns)],
+            shutil.get_terminal_size((100, 24)).columns,
+        )
+        for row in [columns, *cells]:
+            print("  ".join(_pad(v, w) for v, w in zip(row, widths, strict=True)).rstrip())
 
 
-def _column_budget(n_columns: int) -> int:
-    """Per-column width that keeps a table inside the terminal."""
-    width = shutil.get_terminal_size((100, 24)).columns
-    return max(8, (width - 2 * n_columns) // n_columns)
+MIN_WIDTH = 6
 
 
-def _cell(value: Any, truncate: bool, limit: int = 0) -> str:
+def _fit(widths: list[int], available: int) -> list[int]:
+    """Cap every column at the same ceiling, chosen so the row just fits.
+
+    Dividing the terminal equally would squeeze an id as hard as a snippet.
+    Capping instead leaves narrow columns untouched and takes the space from
+    the long ones evenly, rather than sacrificing one of them entirely.
+    """
+    room = available - 2 * (len(widths) - 1)
+    if sum(widths) <= room:
+        return widths
+    cap = max(MIN_WIDTH, _ceiling(sorted(widths), room))
+    return [min(w, cap) for w in widths]
+
+
+def _ceiling(ascending: list[int], room: int) -> int:
+    """The largest cap with sum(min(width, cap)) still within `room`."""
+    for i, width in enumerate(ascending):
+        remaining = len(ascending) - i
+        if sum(ascending[:i]) + width * remaining > room:
+            return (room - sum(ascending[:i])) // remaining
+    return ascending[-1]
+
+
+def _pad(text: str, width: int) -> str:
+    return (text[: width - 1] + "…" if len(text) > width else text).ljust(width)
+
+
+def _cell(value: Any, truncate: bool = False, limit: int = 0) -> str:
     if value is None:
         return ""
     text = str(value).replace("\n", " ").replace("\t", " ")

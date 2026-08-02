@@ -1,17 +1,21 @@
 """The senderos command line."""
 
+import sqlite3
 import sys
 import time
 
 import click
 
-from senderos import db, index, render
+from senderos import db, index, query, render
 from senderos.render import Format, Renderer
 from senderos.wormhole import WormholeUnavailable
 
 EXIT_NO_RESULTS = 1
 EXIT_USAGE = 2
-EXIT_NO_INDEX = 3
+
+
+class NoResults(Exception):
+    """Nothing matched. Not an error, but worth its own exit code."""
 
 
 def format_option(f):
@@ -115,6 +119,163 @@ def status(fmt: str | None, as_json: bool, quiet: bool) -> None:
         out.hint(f"{changed} transcripts have changed. Run `senderos sync`.")
 
 
+def filter_options(f):
+    for option in reversed(
+        [
+            click.option("-p", "--project", help="Only this wormhole project, tasks included."),
+            click.option(
+                "--agent", type=click.Choice(sorted(index.SOURCES)), help="Only this agent."
+            ),
+            click.option("--since", help="Only senderos touched within e.g. 36h, 10d, 2w."),
+            click.option("--min-context", help="Only senderos whose context reached e.g. 500k."),
+            click.option("-n", "--limit", type=int, default=20, show_default=True),
+        ]
+    ):
+        f = option(f)
+    return f
+
+
+def filters(project, agent, since, min_context) -> query.Filters:
+    return query.Filters(project=project, agent=agent, since=since, min_context=min_context)
+
+
+@main.command()
+@click.argument("query_text", metavar="QUERY")
+@filter_options
+@format_option
+def search(query_text, project, agent, since, min_context, limit, fmt, as_json, quiet) -> None:
+    """Find senderos whose text matches QUERY. Best match first, one per line.
+
+    QUERY is SQLite FTS5 syntax: bare words are ANDed, "quoted phrases" are
+    literal, and OR / NOT / prefix* work as expected. Tool calls and their
+    output are deliberately not indexed, so this matches what was said.
+    """
+    out = renderer(fmt, as_json, quiet)
+    conn = db.connect()
+    try:
+        hits = query.search(conn, query_text, filters(project, agent, since, min_context), limit)
+    except sqlite3.OperationalError as e:
+        raise click.UsageError(f"bad query {query_text!r}: {e}") from e
+    _report(out, conn, [_row(h) | {"snippet": _snippet(h["snippet"], query_text)} for h in hits])
+    if hits:
+        out.hint(f"`senderos show {hits[0]['id']}` for the whole of the top hit.")
+
+
+@main.command(name="ls")
+@filter_options
+@click.option("--sort", type=click.Choice(sorted(query.SORTS)), default="recent", show_default=True)
+@format_option
+def list_senderos(project, agent, since, min_context, limit, sort, fmt, as_json, quiet) -> None:
+    """List senderos, most recent first. No text matching; use `search` for that."""
+    out = renderer(fmt, as_json, quiet)
+    conn = db.connect()
+    found = query.recent(conn, filters(project, agent, since, min_context), sort, limit)
+    _report(out, conn, [_row(f) for f in found])
+
+
+@main.command()
+@click.argument("id")
+@click.option("--turns", "turns_only", is_flag=True, help="Just my turns, without the header.")
+@format_option
+def show(id: str, turns_only: bool, fmt: str | None, as_json: bool, quiet: bool) -> None:
+    """Show one sendero and the history of my turns in it.
+
+    Each turn carries the context size at that point, so it is visible where
+    the sendero grew expensive and where compaction cut it back.
+    """
+    out = renderer(fmt, as_json, quiet)
+    conn = db.connect()
+    sendero = _resolve(conn, id)
+    said = query.turns(conn, sendero["id"])
+
+    if as_json:
+        out.record(dict(sendero) | {"turns": said})
+        return
+    if not turns_only:
+        out.record(_details(sendero))
+        out.line("")
+    out.table([_turn(t) for t in said], quiet_key="uuid")
+    out.hint(f"`senderos resume {sendero['id']}` to pick it up.")
+
+
+def _resolve(conn: sqlite3.Connection, id: str) -> dict:
+    sendero = query.get(conn, id)
+    if sendero is None:
+        raise click.UsageError(
+            f"no single sendero matches {id!r}. Try `senderos search` or a longer prefix."
+        )
+    return sendero
+
+
+def _report(out: Renderer, conn: sqlite3.Connection, rows: list[dict]) -> None:
+    out.table(rows)
+    if not rows:
+        raise NoResults()
+    if changed := index.stale(conn):
+        out.hint(f"{changed} transcripts have changed since the last sync. Run `senderos sync`.")
+
+
+def _row(s: dict) -> dict:
+    return {
+        "id": s["id"],
+        "project": s["project"],
+        "when": _date(s["ended_at"]),
+        "turns": s["n_user_turns"],
+        "context": _tokens(s["context_tokens"]),
+        "title": s["title"],
+    }
+
+
+def _details(s: dict) -> dict:
+    return {
+        "id": s["id"],
+        "title": s["title"],
+        "project": s["project"],
+        "branch": s["git_branch"],
+        "cwd": s["cwd"],
+        "model": s["model"],
+        "started": _date(s["started_at"]),
+        "ended": _date(s["ended_at"]),
+        "turns": s["n_user_turns"],
+        "messages": s["n_messages"],
+        "context": _tokens(s["context_tokens"]),
+        "output": _tokens(s["output_tokens"]),
+        "dropped": _tokens(s["dropped_tokens"]),
+    }
+
+
+def _turn(t: dict) -> dict:
+    return {
+        "when": _date(t["ts"], with_time=True),
+        "role": t["role"],
+        "context": _tokens(t["context_tokens"]),
+        "text": t["text"],
+    }
+
+
+def _snippet(text: str, query_text: str) -> str:
+    """The matching node, trimmed to the neighbourhood of the first matching word."""
+    flat = " ".join(text.split())
+    words = [w.strip('"*').lower() for w in query_text.split() if w.isalnum()]
+    lowered = flat.lower()
+    at = next((i for w in words if (i := lowered.find(w)) >= 0), 0)
+    start = max(0, at - 40)
+    return ("…" if start else "") + flat[start : start + 200]
+
+
+def _date(when: int | None, with_time: bool = False) -> str:
+    if not when:
+        return ""
+    shape = "%Y-%m-%d %H:%M" if with_time else "%Y-%m-%d"
+    return time.strftime(shape, time.localtime(when))
+
+
+def _tokens(n: int | None) -> str:
+    if not n:
+        return ""
+    return f"{n / 1_000_000:.1f}m" if n >= 1_000_000 else f"{n // 1000}k" if n >= 1000 else str(n)
+
+
 def _ago(when: int | None) -> str:
     if when is None:
         return "never"
@@ -128,8 +289,11 @@ def _ago(when: int | None) -> str:
 def run() -> int:
     try:
         main.main(standalone_mode=False)
-    except click.UsageError as e:
-        print(f"Error: {e.format_message()}", file=sys.stderr)
+    except NoResults:
+        return EXIT_NO_RESULTS
+    except (click.UsageError, ValueError) as e:
+        message = e.format_message() if isinstance(e, click.UsageError) else str(e)
+        print(f"Error: {message}", file=sys.stderr)
         return EXIT_USAGE
     except click.exceptions.Abort:
         return EXIT_USAGE

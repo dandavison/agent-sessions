@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from senderos.render import AGENT_ENV_VARS, Format, Renderer, detect
+from senderos.render import AGENT_ENV_VARS, MIN_WIDTH, Format, Renderer, _fit, detect
 
 Rows = list[dict[str, object]]
 
@@ -94,3 +94,28 @@ def test_tty_without_agent_env_selects_human(monkeypatch: pytest.MonkeyPatch) ->
 def test_empty_table_is_not_an_error(capsys: pytest.CaptureFixture[str]) -> None:
     assert render(Format.AGENT, capsys, []) == ""
     assert render(Format.HUMAN, capsys, []).strip() == "(none)"
+
+
+# --- column fitting --------------------------------------------------------
+
+
+def test_narrow_columns_are_left_alone_when_one_is_long() -> None:
+    """An id should not be squeezed as hard as a snippet."""
+    assert _fit([10, 6, 400], 100) == [10, 6, 80]  # plus two 2-space gaps
+
+
+def test_two_long_columns_share_what_is_left() -> None:
+    assert _fit([10, 200, 200], 100) == [10, 43, 43]
+
+
+def test_widths_that_already_fit_are_untouched() -> None:
+    assert _fit([10, 20, 30], 200) == [10, 20, 30]
+
+
+def test_a_very_narrow_terminal_still_produces_columns() -> None:
+    assert all(w >= MIN_WIDTH for w in _fit([50, 50, 50], 10))
+
+
+def test_long_values_are_marked_as_cut(capsys: pytest.CaptureFixture[str]) -> None:
+    out = render(Format.HUMAN, capsys, [{"id": "x", "title": "y" * 500}])
+    assert "…" in out
