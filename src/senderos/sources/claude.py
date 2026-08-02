@@ -19,7 +19,7 @@ from typing import Any
 
 import orjson
 
-from senderos.models import Compaction, Delta, Discovered, Edge, Node, Sendero
+from senderos.models import Compaction, Delta, Discovered, Edge, Node, Running, Sendero
 
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
@@ -50,7 +50,7 @@ class ClaudeSource:
     def ingest(self, path: Path) -> Delta | None:
         return parse(path, _read(path))
 
-    def live(self) -> dict[str, str]:
+    def live(self) -> dict[str, Running]:
         return live()
 
     def render(self, path: Path, tools: bool, whole: bool) -> Iterator[str]:
@@ -356,8 +356,8 @@ def _json(value: Any) -> str:
 SESSIONS_DIR = Path.home() / ".claude" / "sessions"
 
 
-def live(sessions_dir: Path = SESSIONS_DIR) -> dict[str, str]:
-    """Session id -> status, for the sessions running right now.
+def live(sessions_dir: Path = SESSIONS_DIR) -> dict[str, Running]:
+    """Session id -> what is running it, for the sessions running right now.
 
     Claude keeps a file per process here. They outlive the process that wrote
     them, so a pid that is gone means a stale entry, not a live session.
@@ -365,8 +365,9 @@ def live(sessions_dir: Path = SESSIONS_DIR) -> dict[str, str]:
     running = {}
     for path in sessions_dir.glob("*.json"):
         record = orjson.loads(path.read_bytes())
-        if (sid := record.get("sessionId")) and _alive(record.get("pid")):
-            running[sid] = str(record.get("status", "running"))
+        pid = record.get("pid")
+        if (sid := record.get("sessionId")) and _alive(pid):
+            running[sid] = Running(pid=pid, status=str(record.get("status", "running")))
     return running
 
 

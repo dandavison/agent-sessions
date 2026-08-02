@@ -318,9 +318,9 @@ def cat(id: str, tools: bool, whole: bool) -> None:
 def resume(id: str, fork: bool, fmt: str | None, as_json: bool, quiet: bool) -> None:
     """Pick a sendero back up, in the worktree it belongs to.
 
-    Wormhole does the work: it focuses or splits a tmux pane and runs the
-    agent there. A session already running is reported rather than started
-    twice.
+    A session that is already running is not started again: you are taken to
+    the pane it is sitting in, whoever started it. Otherwise wormhole splits a
+    pane in the project's window and resumes it there.
     """
     out = renderer(fmt, as_json, quiet)
     conn = db.connect()
@@ -332,17 +332,22 @@ def resume(id: str, fork: bool, fmt: str | None, as_json: bool, quiet: bool) -> 
         )
 
     running = index.SOURCES[sendero["agent"]].live().get(sendero["native_id"])
-    wormhole.resume(sendero["project"], sendero["native_id"], fork=fork)
+    wormhole.resume(
+        sendero["project"],
+        sendero["native_id"],
+        fork=fork,
+        pid=running.pid if running else None,
+    )
     out.record(
         {
             "id": sendero["id"],
             "project": sendero["project"],
             "forked": fork,
-            "was_running": running or "",
+            "was_running": running.status if running else "",
         }
     )
     if running and not fork:
-        out.hint(f"It was already running ({running}); wormhole focused its pane.")
+        out.hint(f"It is already running ({running.status}); focusing its pane.")
 
 
 @main.group(name="skills")

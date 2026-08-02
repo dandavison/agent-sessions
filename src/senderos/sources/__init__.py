@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Protocol
 
-from senderos.models import Delta, Discovered
+from senderos.models import Delta, Discovered, Running
 
 
 class Source(Protocol):
@@ -18,8 +18,8 @@ class Source(Protocol):
         """Read one transcript. None when it holds no conversation."""
         ...
 
-    def live(self) -> dict[str, str]:
-        """Native id -> status, for whatever this agent is running right now."""
+    def live(self) -> dict[str, Running]:
+        """Native id -> process, for whatever this agent is running right now."""
         ...
 
     def render(self, path: Path, tools: bool, whole: bool) -> Iterator[str]:

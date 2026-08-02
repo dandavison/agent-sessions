@@ -70,6 +70,14 @@ class Edge:
 
 
 @dataclass(frozen=True, slots=True)
+class Running:
+    """A session with a live process behind it, and the pane it is sitting in."""
+
+    pid: int
+    status: str
+
+
+@dataclass(frozen=True, slots=True)
 class Compaction:
     sendero_id: str
     uuid: str

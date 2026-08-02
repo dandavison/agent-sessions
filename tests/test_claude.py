@@ -17,7 +17,7 @@ from conftest import (
     user,
 )
 
-from senderos.models import Delta
+from senderos.models import Delta, Running
 from senderos.sources.claude import ClaudeSource, parse
 from senderos.sources.claude import live as claude_live
 from senderos.sources.claude import render as claude_render
@@ -561,7 +561,13 @@ def write_registry(tmp_path: Path, records: list[dict[str, Any]]) -> Path:
 
 def test_live_reports_running_sessions(tmp_path: Path) -> None:
     sessions = write_registry(tmp_path, [{"pid": os.getpid(), "sessionId": "s1", "status": "idle"}])
-    assert claude_live(sessions) == {"s1": "idle"}
+    assert claude_live(sessions) == {"s1": Running(pid=os.getpid(), status="idle")}
+
+
+def test_live_carries_the_pid_so_its_pane_can_be_found(tmp_path: Path) -> None:
+    """Focusing the pane a session is already in needs the process, not just the id."""
+    sessions = write_registry(tmp_path, [{"pid": os.getpid(), "sessionId": "s1", "status": "busy"}])
+    assert claude_live(sessions)["s1"].pid == os.getpid()
 
 
 def test_a_dead_process_is_not_a_live_session(tmp_path: Path) -> None:

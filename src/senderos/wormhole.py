@@ -39,11 +39,16 @@ def worktrees() -> list[Worktree]:
     ]
 
 
-def resume(project: str, session: str, fork: bool = False) -> None:
-    """Wormhole owns the terminal, so it is what actually starts the agent."""
+def resume(project: str, session: str, fork: bool = False, pid: int | None = None) -> None:
+    """Wormhole owns the terminal, so it is what actually starts the agent.
+
+    Given the pid of a session already running, it focuses that pane instead.
+    """
     params = {"project": project, "session": session}
     if fork:
         params["fork"] = "true"
+    if pid:
+        params["pid"] = str(pid)
     _post("/conversations/resume-session", params)
 
 
