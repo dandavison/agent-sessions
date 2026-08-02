@@ -380,40 +380,16 @@ def test_unforked_transcript_has_no_edges(tmp_path: Path) -> None:
 # --- discovery -------------------------------------------------------------
 
 
-def test_discover_finds_sessions_and_subagents(tmp_path: Path) -> None:
+def test_discover_finds_sessions_but_not_subagents(tmp_path: Path) -> None:
+    """Nobody talked to a subagent, so its transcript is not a sendero."""
     path = write(tmp_path, linear())
     subagents = path.parent / SESSION / "subagents"
     subagents.mkdir(parents=True)
     (subagents / "agent-abc123.jsonl").write_bytes(
         orjson.dumps(user("s1", None, "explore this", agentId="abc123", isSidechain=True)) + b"\n"
     )
-    (subagents / "agent-abc123.meta.json").write_bytes(
-        orjson.dumps({"agentType": "Explore", "description": "look around", "spawnDepth": 1})
-    )
 
-    found = {d.id for d in ClaudeSource(tmp_path).discover()}
-    assert found == {f"claude:{SESSION}", f"claude:{SESSION}/abc123"}
-
-
-def test_subagent_is_a_sendero_spawned_by_its_session(tmp_path: Path) -> None:
-    write(tmp_path, linear())
-    subagents = tmp_path / "-Users-dan-src-wormhole" / SESSION / "subagents"
-    subagents.mkdir(parents=True)
-    (subagents / "agent-abc123.jsonl").write_bytes(
-        orjson.dumps(user("s1", None, "explore this", agentId="abc123", isSidechain=True)) + b"\n"
-    )
-    (subagents / "agent-abc123.meta.json").write_bytes(orjson.dumps({"agentType": "Explore"}))
-
-    source = ClaudeSource(tmp_path)
-    delta = source.ingest(subagents / "agent-abc123.jsonl")
-    assert delta is not None
-    assert delta.sendero.id == f"claude:{SESSION}/abc123"
-    assert delta.sendero.is_sidechain
-    assert delta.sendero.agent_type == "Explore"
-    (edge,) = delta.edges
-    assert edge == type(edge)(
-        child=f"claude:{SESSION}/abc123", parent=f"claude:{SESSION}", kind="spawn", at_uuid=None
-    )
+    assert {d.id for d in ClaudeSource(tmp_path).discover()} == {f"claude:{SESSION}"}
 
 
 def test_discovery_does_not_escape_the_projects_dir(tmp_path: Path) -> None:

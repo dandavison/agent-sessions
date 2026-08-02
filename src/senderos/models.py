@@ -35,7 +35,6 @@ class Sendero:
     leaf_uuid: str | None = None
     is_sidechain: bool = False
     session_kind: str | None = None
-    agent_type: str | None = None
     file_mtime: int = 0
 
 
@@ -62,7 +61,7 @@ class Node:
 
 @dataclass(frozen=True, slots=True)
 class Edge:
-    """A link between two senderos: a fork, or a subagent spawn."""
+    """A link between two senderos. Currently only `fork`."""
 
     child: str
     parent: str

@@ -31,7 +31,6 @@ CREATE TABLE sendero (
   leaf_uuid      TEXT,
   is_sidechain   INTEGER NOT NULL DEFAULT 0,
   session_kind   TEXT,
-  agent_type     TEXT,
   file_mtime     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX sendero_ended_at ON sendero (ended_at DESC);

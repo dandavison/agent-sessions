@@ -1,10 +1,13 @@
 """Claude Code transcripts.
 
-One `~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl` per sendero, plus
-`<session-uuid>/subagents/agent-*.jsonl` for the agents it spawned. The records
-form a DAG via parentUuid, not a list: rewinding an edited message branches it,
-and compaction starts a fresh root inside the same file. So the live thread is
-the walk back from the leaf, never the order the lines happen to be in.
+One `~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl` per sendero. The
+records form a DAG via parentUuid, not a list: rewinding an edited message
+branches it, and compaction starts a fresh root inside the same file. So the
+live thread is the walk back from the leaf, never the order the lines happen
+to be in.
+
+Subagent transcripts, under `<session-uuid>/subagents/`, are not senderos. The
+point of the index is work I took part in, and nobody talked to those.
 """
 
 from collections import defaultdict
@@ -39,19 +42,14 @@ class ClaudeSource:
         self.root = root
 
     def discover(self) -> list[Discovered]:
-        found = []
-        for path in sorted(self.root.glob("*/*.jsonl")):
-            found.append(_discovered(f"claude:{path.stem}", path))
-            for agent in sorted((path.parent / path.stem / "subagents").glob("agent-*.jsonl")):
-                agent_id = agent.stem.removeprefix("agent-")
-                found.append(_discovered(f"claude:{path.stem}/{agent_id}", agent, agent_id))
-        return found
+        """Only top-level sessions: the glob does not descend into `subagents/`."""
+        return [_discovered(f"claude:{p.stem}", p) for p in sorted(self.root.glob("*/*.jsonl"))]
 
     def ingest(self, path: Path) -> Delta | None:
         return parse(path, _read(path))
 
 
-def _discovered(id: str, path: Path, agent_id: str | None = None) -> Discovered:
+def _discovered(id: str, path: Path) -> Discovered:
     stat = path.stat()
     return Discovered(id=id, path=path, size=stat.st_size, mtime=int(stat.st_mtime))
 
@@ -90,10 +88,7 @@ def parse(path: Path, records: list[dict[str, Any]]) -> Delta | None:
 
 def _sendero(path: Path, records: list[dict[str, Any]], nodes: list[dict[str, Any]]) -> Sendero:
     first, last = nodes[0], nodes[-1]
-    session_id = first.get("sessionId") or path.stem
-    agent_id = first.get("agentId")
-    native_id = f"{session_id}/{agent_id}" if agent_id else session_id
-
+    native_id = first.get("sessionId") or path.stem
     state = _sidecar_state(records)
     return Sendero(
         id=f"claude:{native_id}",
@@ -106,7 +101,6 @@ def _sendero(path: Path, records: list[dict[str, Any]], nodes: list[dict[str, An
         leaf_uuid=state.get("leafUuid"),
         is_sidechain=bool(first.get("isSidechain")),
         session_kind=first.get("sessionKind"),
-        agent_type=_agent_type(path) if agent_id else None,
         file_mtime=int(path.stat().st_mtime),
     )
 
@@ -125,13 +119,6 @@ def _sidecar_state(records: list[dict[str, Any]]) -> dict[str, str]:
         if key and record.get(key):
             state[key] = record[key]
     return state
-
-
-def _agent_type(path: Path) -> str | None:
-    meta = path.with_suffix(".meta.json")
-    if not meta.exists():
-        return None
-    return orjson.loads(meta.read_bytes()).get("agentType")
 
 
 def _branch_points(nodes: list[dict[str, Any]]) -> set[str]:
@@ -232,10 +219,7 @@ def _compactions(sendero_id: str, records: list[dict[str, Any]]) -> list[Compact
 
 
 def _edges(sendero_id: str, records: list[dict[str, Any]]) -> list[Edge]:
-    """A fork reuses the parent's message uuid as its own root, so the splice is exact.
-
-    A subagent's id embeds the session that spawned it.
-    """
+    """A fork reuses the parent's message uuid as its own root, so the splice is exact."""
     for record in records:
         if fork := record.get("forkedFrom"):
             return [
@@ -246,9 +230,6 @@ def _edges(sendero_id: str, records: list[dict[str, Any]]) -> list[Edge]:
                     at_uuid=fork.get("messageUuid"),
                 )
             ]
-    native = sendero_id.removeprefix("claude:")
-    if "/" in native:
-        return [Edge(child=sendero_id, parent=f"claude:{native.split('/')[0]}", kind="spawn")]
     return []
 
 
