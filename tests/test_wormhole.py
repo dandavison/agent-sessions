@@ -8,6 +8,22 @@ def attributor(*pairs: tuple[str, str]) -> Attributor:
     return Attributor([Worktree(project_key=k, working_tree=p) for p, k in pairs])
 
 
+def with_worktrees() -> Attributor:
+    """One live task and the repo it was cut from, laid out as wormhole lays them out."""
+    return Attributor(
+        [
+            Worktree("temporal", "/Users/dan/src/temporalio/temporal", "temporal", None),
+            Worktree("delta", "/Users/dan/src/delta", "delta", None),
+            Worktree(
+                "temporal:dan/live",
+                "/Users/dan/worktrees/temporal/dan--live/temporal",
+                "temporal",
+                "dan/live",
+            ),
+        ]
+    )
+
+
 def test_longest_prefix_wins() -> None:
     a = attributor(
         ("/Users/dan/src/temporalio/temporal", "temporal"),
@@ -54,3 +70,31 @@ def test_wormhole_down_is_an_error_not_a_fallback(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(httpx, "get", refuse)
     with pytest.raises(WormholeUnavailable):
         worktrees()
+
+
+def test_closed_task_attributes_to_its_repo() -> None:
+    """The worktree is gone, so wormhole cannot name the task — but the path names the repo."""
+    a = with_worktrees()
+    assert a.project_for("/Users/dan/worktrees/temporal/dan--closed/temporal/host") == "temporal"
+
+
+def test_live_task_still_beats_its_repo() -> None:
+    a = with_worktrees()
+    assert a.project_for("/Users/dan/worktrees/temporal/dan--live/temporal") == "temporal:dan/live"
+
+
+def test_worktree_of_an_unknown_repo_is_unattributed() -> None:
+    a = with_worktrees()
+    assert a.project_for("/Users/dan/worktrees/notmine/some--branch/notmine") is None
+
+
+def test_paths_outside_the_worktree_dir_are_unaffected() -> None:
+    a = with_worktrees()
+    assert a.project_for("/Users/dan/.cargo/registry/src/index.crates.io/parking_lot-0.9") is None
+    assert a.project_for("/tmp/scratch") is None
+
+
+def test_repo_attribution_needs_a_live_task_to_locate_the_worktree_dir() -> None:
+    """With no task anywhere, the worktree directory is unknown and nothing is guessed."""
+    a = Attributor([Worktree("delta", "/Users/dan/src/delta", "delta", None)])
+    assert a.project_for("/Users/dan/worktrees/delta/gone/delta") is None
