@@ -39,8 +39,12 @@ def worktrees() -> list[Worktree]:
     ]
 
 
-def resume(sendero_id: str, fork: bool = False) -> None:
-    _post(f"/conversations/resume/{sendero_id}", params={"fork": "true"} if fork else {})
+def resume(project: str, session: str, fork: bool = False) -> None:
+    """Wormhole owns the terminal, so it is what actually starts the agent."""
+    params = {"project": project, "session": session}
+    if fork:
+        params["fork"] = "true"
+    _post("/conversations/resume-session", params)
 
 
 class Attributor:

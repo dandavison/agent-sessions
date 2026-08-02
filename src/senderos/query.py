@@ -112,7 +112,7 @@ _RECENCY = "3.0 / (1.0 + (strftime('%s', 'now') - COALESCE(sendero.ended_at, 0))
 def get(conn: sqlite3.Connection, id: str) -> dict | None:
     """Resolve a sendero by full id, bare native id, or any unambiguous prefix."""
     rows = conn.execute(
-        f"SELECT {COLUMNS}, leaf_uuid, path FROM sendero"
+        f"SELECT {COLUMNS}, native_id, leaf_uuid, path FROM sendero"
         " WHERE id = ? OR native_id = ? OR id LIKE ? OR native_id LIKE ?"
         " LIMIT 2",
         (id, id, f"{id}%", f"{id}%"),

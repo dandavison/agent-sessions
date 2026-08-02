@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ from conftest import (
 
 from senderos.models import Delta
 from senderos.sources.claude import ClaudeSource, parse
+from senderos.sources.claude import live as claude_live
 from senderos.sources.claude import render as claude_render
 
 SESSION = "7e90a7c6-ce43-4dfd-9d7c-8eb01ac7ccf2"
@@ -544,3 +546,34 @@ def test_render_whole_includes_abandoned_branches() -> None:
 def test_render_marks_a_compaction() -> None:
     out = rendered(compacted())
     assert "*Compacted (auto): 1,000,823 → 22,191 tokens*" in out
+
+
+# --- the live session registry ---------------------------------------------
+
+
+def write_registry(tmp_path: Path, records: list[dict[str, Any]]) -> Path:
+    sessions = tmp_path / "sessions"
+    sessions.mkdir()
+    for i, record in enumerate(records):
+        (sessions / f"{i}.json").write_bytes(orjson.dumps(record))
+    return sessions
+
+
+def test_live_reports_running_sessions(tmp_path: Path) -> None:
+    sessions = write_registry(tmp_path, [{"pid": os.getpid(), "sessionId": "s1", "status": "idle"}])
+    assert claude_live(sessions) == {"s1": "idle"}
+
+
+def test_a_dead_process_is_not_a_live_session(tmp_path: Path) -> None:
+    """The files outlive the process that wrote them."""
+    sessions = write_registry(tmp_path, [{"pid": 2**31 - 1, "sessionId": "s1", "status": "idle"}])
+    assert claude_live(sessions) == {}
+
+
+def test_registry_entry_without_a_pid_is_ignored(tmp_path: Path) -> None:
+    sessions = write_registry(tmp_path, [{"sessionId": "s1", "status": "idle"}])
+    assert claude_live(sessions) == {}
+
+
+def test_no_registry_at_all(tmp_path: Path) -> None:
+    assert claude_live(tmp_path / "nothing") == {}

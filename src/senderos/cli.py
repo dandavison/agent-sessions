@@ -8,7 +8,7 @@ from pathlib import Path
 
 import click
 
-from senderos import db, index, query, render, topology
+from senderos import db, index, query, render, topology, wormhole
 from senderos.render import Format, Renderer
 from senderos.wormhole import WormholeUnavailable
 
@@ -56,6 +56,7 @@ Examples
   $ senderos show claude:7e90a7c6 --turns
   $ senderos tree claude:7e90a7c6
   $ senderos cat claude:7e90a7c6 --tools
+  $ senderos resume claude:7e90a7c6
 """,
 )
 @click.version_option()
@@ -277,6 +278,40 @@ def cat(id: str, tools: bool, whole: bool) -> None:
         raise click.UsageError(f"{path} is gone. Run `senderos sync`.")
     for chunk in source.render(path, tools=tools, whole=whole):
         sys.stdout.write(chunk)
+
+
+@main.command()
+@click.argument("id")
+@click.option("--fork", is_flag=True, help="Branch into a new session, leaving this one as it is.")
+@format_option
+def resume(id: str, fork: bool, fmt: str | None, as_json: bool, quiet: bool) -> None:
+    """Pick a sendero back up, in the worktree it belongs to.
+
+    Wormhole does the work: it focuses or splits a tmux pane and runs the
+    agent there. A session already running is reported rather than started
+    twice.
+    """
+    out = renderer(fmt, as_json, quiet)
+    conn = db.connect()
+    sendero = _resolve(conn, id)
+    if not sendero["project"]:
+        raise click.UsageError(
+            f"{sendero['id']} has no project: its cwd was {sendero['cwd']}."
+            " There is nowhere to resume it."
+        )
+
+    running = index.SOURCES[sendero["agent"]].live().get(sendero["native_id"])
+    wormhole.resume(sendero["project"], sendero["native_id"], fork=fork)
+    out.record(
+        {
+            "id": sendero["id"],
+            "project": sendero["project"],
+            "forked": fork,
+            "was_running": running or "",
+        }
+    )
+    if running and not fork:
+        out.hint(f"It was already running ({running}); wormhole focused its pane.")
 
 
 def _resolve(conn: sqlite3.Connection, id: str) -> dict:

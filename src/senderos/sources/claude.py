@@ -10,6 +10,7 @@ Subagent transcripts, under `<session-uuid>/subagents/`, are not senderos. The
 point of the index is work I took part in, and nobody talked to those.
 """
 
+import os
 from collections import defaultdict
 from collections.abc import Iterator
 from datetime import datetime
@@ -48,6 +49,9 @@ class ClaudeSource:
 
     def ingest(self, path: Path) -> Delta | None:
         return parse(path, _read(path))
+
+    def live(self) -> dict[str, str]:
+        return live()
 
     def render(self, path: Path, tools: bool, whole: bool) -> Iterator[str]:
         return render(_read(path), tools=tools, whole=whole)
@@ -347,3 +351,32 @@ def _result_text(content: Any) -> str:
 
 def _json(value: Any) -> str:
     return orjson.dumps(value, option=orjson.OPT_INDENT_2).decode()
+
+
+SESSIONS_DIR = Path.home() / ".claude" / "sessions"
+
+
+def live(sessions_dir: Path = SESSIONS_DIR) -> dict[str, str]:
+    """Session id -> status, for the sessions running right now.
+
+    Claude keeps a file per process here. They outlive the process that wrote
+    them, so a pid that is gone means a stale entry, not a live session.
+    """
+    running = {}
+    for path in sessions_dir.glob("*.json"):
+        record = orjson.loads(path.read_bytes())
+        if (sid := record.get("sessionId")) and _alive(record.get("pid")):
+            running[sid] = str(record.get("status", "running"))
+    return running
+
+
+def _alive(pid: int | None) -> bool:
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+    except (ProcessLookupError, OverflowError, ValueError):
+        return False
+    except PermissionError:
+        return True
+    return True

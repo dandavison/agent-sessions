@@ -18,6 +18,10 @@ class Source(Protocol):
         """Read one transcript. None when it holds no conversation."""
         ...
 
+    def live(self) -> dict[str, str]:
+        """Native id -> status, for whatever this agent is running right now."""
+        ...
+
     def render(self, path: Path, tools: bool, whole: bool) -> Iterator[str]:
         """The transcript as markdown, straight from the file.
 
