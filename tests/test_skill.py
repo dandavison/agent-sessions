@@ -59,3 +59,16 @@ def test_install_is_idempotent(tmp_path: Path) -> None:
     first = skill.install(tmp_path / "senderos")
     second = skill.install(tmp_path / "senderos")
     assert first == second
+
+
+def test_examples_are_carried_through(tmp_path: Path) -> None:
+    text = skill.generate()
+    assert "$ senderos search compaction" in text
+    assert "```" in text
+
+
+def test_example_indentation_survives() -> None:
+    """A comment continued onto the next line must stay under the one it follows."""
+    lines = skill.generate().splitlines()
+    continuation = next(line for line in lines if line.lstrip().startswith("# matches Compaction"))
+    assert continuation.startswith("    ")

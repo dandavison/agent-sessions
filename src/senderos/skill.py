@@ -5,6 +5,7 @@ from the CLI it describes.
 """
 
 from pathlib import Path
+from textwrap import dedent
 
 import click
 
@@ -66,8 +67,23 @@ def generate(command: click.Group | None = None) -> str:
         if options := _options(sub):
             lines.append("")
             lines += options
+        if examples := _examples(sub):
+            lines.append("")
+            lines += examples
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _examples(command: click.Command) -> list[str]:
+    """Worked examples, which an agent matches against faster than it reads prose.
+
+    Indentation is preserved, not stripped: a comment continued onto the next
+    line only reads as a continuation if it stays under the one it follows.
+    """
+    if not command.epilog:
+        return []
+    body = command.epilog.replace("\b\n", "").replace("Examples\n", "")
+    return ["```", *dedent(body).strip("\n").splitlines(), "```"]
 
 
 def _arguments(command: click.Command) -> list[str]:

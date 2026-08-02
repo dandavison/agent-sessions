@@ -297,3 +297,45 @@ def test_an_old_match_still_wins_if_recent_ones_are_much_worse(conn) -> None:
         ],
     )
     assert query.search(conn, "kangaroo", query.Filters(), 10)[0]["id"] == "claude:old"
+
+
+# --- how matching behaves --------------------------------------------------
+
+
+def stemming_corpus(conn) -> None:
+    populate(
+        conn,
+        [sendero("claude:a")],
+        [Node("claude:a", "u1", None, 0, "user", NOW, "Relocating the Worktrees")],
+    )
+
+
+@pytest.mark.parametrize("q", ["relocating", "Relocating", "RELOCATING", "ReLoCaTiNg"])
+def test_search_is_case_insensitive(conn, q: str) -> None:
+    stemming_corpus(conn)
+    assert len(query.search(conn, q, query.Filters(), 10)) == 1
+
+
+@pytest.mark.parametrize("q", ["relocate", "relocated", "relocation", "relocating"])
+def test_search_is_stemmed(conn, q: str) -> None:
+    stemming_corpus(conn)
+    assert len(query.search(conn, q, query.Filters(), 10)) == 1
+
+
+def test_a_prefix_must_target_the_stem(conn) -> None:
+    """ "Relocating" is stored as `reloc`, so a longer prefix cannot match it."""
+    stemming_corpus(conn)
+    assert len(query.search(conn, "reloc*", query.Filters(), 10)) == 1
+    assert query.search(conn, "relocat*", query.Filters(), 10) == []
+
+
+def test_bare_words_are_anded(conn) -> None:
+    stemming_corpus(conn)
+    assert len(query.search(conn, "relocating worktrees", query.Filters(), 10)) == 1
+    assert query.search(conn, "relocating kangaroo", query.Filters(), 10) == []
+
+
+def test_or_and_not(conn) -> None:
+    stemming_corpus(conn)
+    assert len(query.search(conn, "kangaroo OR worktrees", query.Filters(), 10)) == 1
+    assert query.search(conn, "worktrees NOT relocating", query.Filters(), 10) == []

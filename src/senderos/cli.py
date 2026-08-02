@@ -145,16 +145,39 @@ def filters(project, agent, since, min_context) -> query.Filters:
     return query.Filters(project=project, agent=agent, since=since, min_context=min_context)
 
 
-@main.command()
+@main.command(
+    epilog="""\b
+Examples
+  $ senderos search compaction                    # case-insensitive, and stemmed:
+                                                  # matches Compaction, compacted
+  $ senderos search "worktree relocation"         # both words, in any order
+  $ senderos search '"worktree relocation"'       # the exact phrase
+  $ senderos search 'nexus OR chasm'              # either
+  $ senderos search 'activity NOT workflow'       # one but not the other
+  $ senderos search 'reloc*'                      # prefix of the STEM: relocat*
+                                                  # would find nothing
+  $ senderos search compaction -p temporal --since 2w
+  $ senderos search compaction --min-context 500k -n 5
+  $ senderos search compaction -q | head -1       # bare id, to pipe
+"""
+)
 @click.argument("query_text", metavar="QUERY")
 @filter_options
 @format_option
 def search(query_text, project, agent, since, min_context, limit, fmt, as_json, quiet) -> None:
     """Find senderos whose text matches QUERY. Best match first, one per line.
 
+    Matching is case-insensitive and stemmed, so `relocate` finds "relocating".
     QUERY is SQLite FTS5 syntax: bare words are ANDed, "quoted phrases" are
-    literal, and OR / NOT / prefix* work as expected. Tool calls and their
-    output are deliberately not indexed, so this matches what was said.
+    literal, and OR / NOT work as expected. Ranking blends how well the text
+    matches with how recent the sendero is.
+
+    Stemming makes prefix search a trap: "relocating" is stored as `reloc`, so
+    `reloc*` matches it and `relocat*` does not. Stemming usually covers what
+    you wanted a prefix for anyway.
+
+    Tool calls and their output are deliberately not indexed, so this searches
+    what was said, not what was run. Use `senderos cat --tools` for those.
     """
     out = renderer(fmt, as_json, quiet)
     conn = db.connect()
