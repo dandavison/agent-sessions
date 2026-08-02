@@ -10,9 +10,9 @@ class Source(Protocol):
     name: str
 
     def discover(self) -> list[Discovered]:
-        """Every transcript this source knows about, with enough to detect change."""
+        """Every transcript this source knows about."""
         ...
 
-    def ingest(self, path: Path, from_offset: int) -> Delta:
-        """Parse from `from_offset` to EOF. Zero means the whole file."""
+    def ingest(self, path: Path) -> Delta | None:
+        """Read one transcript. None when it holds no conversation."""
         ...

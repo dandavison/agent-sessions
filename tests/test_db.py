@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from senderos import db
-from senderos.models import Compaction, Edge, Sendero, Turn
+from senderos.models import Compaction, Edge, Node, Sendero
 
 
 def make_sendero(id: str = "claude:a", path: str = "/t/a.jsonl", **kw) -> Sendero:
@@ -11,7 +11,7 @@ def make_sendero(id: str = "claude:a", path: str = "/t/a.jsonl", **kw) -> Sender
 def test_connect_creates_schema(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "index.db")
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-    assert {"sendero", "turn", "sendero_edge", "compaction", "turn_fts"} <= tables
+    assert {"sendero", "node", "sendero_edge", "compaction", "node_fts"} <= tables
     assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
 
 
@@ -42,23 +42,21 @@ def test_write_sendero_round_trips_bools(tmp_path: Path) -> None:
     assert conn.execute("SELECT is_sidechain FROM sendero").fetchone()[0] == 1
 
 
-def test_cursors_reports_ingest_state(tmp_path: Path) -> None:
+def test_known_mtimes_reports_what_was_last_read(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "index.db")
-    db.write_sendero(conn, make_sendero(file_size=100, file_mtime=5, byte_offset=90))
-    db.write_sendero(conn, make_sendero(id="codex:b", path="/t/b.jsonl", file_size=7, file_mtime=1))
-    conn.execute("UPDATE sendero SET agent = 'codex' WHERE id = 'codex:b'")
-    assert db.cursors(conn, "claude") == {"/t/a.jsonl": (100, 5, 90)}
-    assert db.cursors(conn, "codex") == {"/t/b.jsonl": (7, 1, 0)}
+    db.write_sendero(conn, make_sendero(file_mtime=5))
+    db.write_sendero(conn, make_sendero(id="claude:b", path="/t/b.jsonl", file_mtime=9))
+    assert db.known_mtimes(conn) == {"/t/a.jsonl": 5, "/t/b.jsonl": 9}
 
 
 def test_forget_cascades(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "index.db")
     db.write_sendero(conn, make_sendero())
     db.write_sendero(conn, make_sendero(id="claude:b", path="/t/b.jsonl"))
-    db.write_turns(
+    db.write_nodes(
         conn,
         [
-            Turn(
+            Node(
                 sendero_id="claude:a",
                 uuid="u1",
                 parent_uuid=None,
@@ -88,19 +86,19 @@ def test_forget_cascades(tmp_path: Path) -> None:
     )
 
     assert db.forget(conn, ["claude:a"]) == 1
-    assert conn.execute("SELECT count(*) FROM turn").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM node").fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM compaction").fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM sendero_edge").fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM sendero").fetchone()[0] == 1
 
 
-def test_fts_finds_turn_text(tmp_path: Path) -> None:
+def test_fts_finds_node_text(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "index.db")
     db.write_sendero(conn, make_sendero())
-    db.write_turns(
+    db.write_nodes(
         conn,
         [
-            Turn(
+            Node(
                 sendero_id="claude:a",
                 uuid="u1",
                 parent_uuid=None,
@@ -109,7 +107,7 @@ def test_fts_finds_turn_text(tmp_path: Path) -> None:
                 ts=1,
                 text="why is conform relocating worktrees",
             ),
-            Turn(
+            Node(
                 sendero_id="claude:a",
                 uuid="u2",
                 parent_uuid="u1",
@@ -122,8 +120,8 @@ def test_fts_finds_turn_text(tmp_path: Path) -> None:
     )
     db.reindex_fts(conn)
     hits = conn.execute(
-        "SELECT turn.uuid FROM turn_fts JOIN turn ON turn.rowid = turn_fts.rowid"
-        " WHERE turn_fts MATCH ?",
+        "SELECT node.uuid FROM node_fts JOIN node ON node.rowid = node_fts.rowid"
+        " WHERE node_fts MATCH ?",
         ("relocating",),
     ).fetchall()
     assert [h["uuid"] for h in hits] == ["u1"]
@@ -132,10 +130,10 @@ def test_fts_finds_turn_text(tmp_path: Path) -> None:
 def test_fts_stems(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "index.db")
     db.write_sendero(conn, make_sendero())
-    db.write_turns(
+    db.write_nodes(
         conn,
         [
-            Turn(
+            Node(
                 sendero_id="claude:a",
                 uuid="u1",
                 parent_uuid=None,
@@ -148,6 +146,23 @@ def test_fts_stems(tmp_path: Path) -> None:
     )
     db.reindex_fts(conn)
     hits = conn.execute(
-        "SELECT rowid FROM turn_fts WHERE turn_fts MATCH ?", ("relocate",)
+        "SELECT rowid FROM node_fts WHERE node_fts MATCH ?", ("relocate",)
     ).fetchall()
+    assert len(hits) == 1
+
+
+def test_silent_nodes_never_match_search(tmp_path: Path) -> None:
+    """Tool calls are stored to keep the DAG whole, but carry no text to find."""
+    conn = db.connect(tmp_path / "index.db")
+    db.write_sendero(conn, make_sendero())
+    db.write_nodes(
+        conn,
+        [
+            Node("claude:a", "u1", None, 0, "user", 1, "find me"),
+            Node("claude:a", "t1", "u1", 1, "assistant", 2, ""),
+        ],
+    )
+    db.reindex_fts(conn)
+    assert conn.execute("SELECT count(*) FROM node").fetchone()[0] == 2
+    hits = conn.execute("SELECT rowid FROM node_fts WHERE node_fts MATCH ?", ("find",)).fetchall()
     assert len(hits) == 1

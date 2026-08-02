@@ -36,13 +36,18 @@ class Sendero:
     is_sidechain: bool = False
     session_kind: str | None = None
     agent_type: str | None = None
-    file_size: int = 0
     file_mtime: int = 0
-    byte_offset: int = 0
 
 
 @dataclass(slots=True)
-class Turn:
+class Node:
+    """One record in the transcript DAG.
+
+    Every node is stored, not just the ones carrying prose: a thread is often
+    rewound at a tool call or a timing record, so dropping those would lose the
+    branch. `text` is empty for the silent ones, and only prose reaches search.
+    """
+
     sendero_id: str
     uuid: str
     parent_uuid: str | None
@@ -83,6 +88,6 @@ class Delta:
     """Everything one transcript file contributed to the index."""
 
     sendero: Sendero
-    turns: list[Turn] = field(default_factory=list)
+    nodes: list[Node] = field(default_factory=list)
     edges: list[Edge] = field(default_factory=list)
     compactions: list[Compaction] = field(default_factory=list)

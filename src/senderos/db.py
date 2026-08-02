@@ -4,7 +4,7 @@ import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
 
-from senderos.models import Compaction, Edge, Sendero, Turn
+from senderos.models import Compaction, Edge, Node, Sendero
 
 SCHEMA_VERSION = 1
 
@@ -32,27 +32,25 @@ CREATE TABLE sendero (
   is_sidechain   INTEGER NOT NULL DEFAULT 0,
   session_kind   TEXT,
   agent_type     TEXT,
-  file_size      INTEGER NOT NULL DEFAULT 0,
-  file_mtime     INTEGER NOT NULL DEFAULT 0,
-  byte_offset    INTEGER NOT NULL DEFAULT 0
+  file_mtime     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX sendero_ended_at ON sendero (ended_at DESC);
 CREATE INDEX sendero_project ON sendero (project);
 CREATE UNIQUE INDEX sendero_path ON sendero (path);
 
-CREATE TABLE turn (
-  sendero_id     TEXT NOT NULL REFERENCES sendero (id) ON DELETE CASCADE,
-  uuid           TEXT PRIMARY KEY,
-  parent_uuid    TEXT,
-  seq            INTEGER NOT NULL,
-  role           TEXT NOT NULL,
-  ts             INTEGER,
-  text           TEXT NOT NULL,
-  request_id     TEXT,
-  context_tokens INTEGER NOT NULL DEFAULT 0,
+CREATE TABLE node (
+  sendero_id      TEXT NOT NULL REFERENCES sendero (id) ON DELETE CASCADE,
+  uuid            TEXT PRIMARY KEY,
+  parent_uuid     TEXT,
+  seq             INTEGER NOT NULL,
+  role            TEXT NOT NULL,
+  ts              INTEGER,
+  text            TEXT NOT NULL,
+  request_id      TEXT,
+  context_tokens  INTEGER NOT NULL DEFAULT 0,
   is_branch_point INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX turn_sendero ON turn (sendero_id, seq);
+CREATE INDEX node_sendero ON node (sendero_id, seq);
 
 CREATE TABLE sendero_edge (
   child   TEXT NOT NULL,
@@ -76,9 +74,9 @@ CREATE TABLE compaction (
 );
 CREATE INDEX compaction_sendero ON compaction (sendero_id);
 
-CREATE VIRTUAL TABLE turn_fts USING fts5 (
+CREATE VIRTUAL TABLE node_fts USING fts5 (
   text,
-  content='turn',
+  content='node',
   content_rowid='rowid',
   tokenize='porter unicode61'
 );
@@ -108,14 +106,11 @@ def _rebuild(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def cursors(conn: sqlite3.Connection, agent: str) -> dict[str, tuple[int, int, int]]:
-    """Per-transcript ingest state: path -> (size, mtime, byte offset) as last read."""
+def known_mtimes(conn: sqlite3.Connection) -> dict[str, int]:
+    """Transcript path -> its mtime when last read, so `status` can spot a stale index."""
     return {
-        row["path"]: (row["file_size"], row["file_mtime"], row["byte_offset"])
-        for row in conn.execute(
-            "SELECT path, file_size, file_mtime, byte_offset FROM sendero WHERE agent = ?",
-            (agent,),
-        )
+        row["path"]: row["file_mtime"]
+        for row in conn.execute("SELECT path, file_mtime FROM sendero")
     }
 
 
@@ -128,26 +123,26 @@ def write_sendero(conn: sqlite3.Connection, s: Sendero) -> None:
     )
 
 
-def write_turns(conn: sqlite3.Connection, turns: Iterable[Turn]) -> None:
+def write_nodes(conn: sqlite3.Connection, nodes: Iterable[Node]) -> None:
     rows = [
         (
-            t.sendero_id,
-            t.uuid,
-            t.parent_uuid,
-            t.seq,
-            t.role,
-            t.ts,
-            t.text,
-            t.request_id,
-            t.context_tokens,
-            int(t.is_branch_point),
+            n.sendero_id,
+            n.uuid,
+            n.parent_uuid,
+            n.seq,
+            n.role,
+            n.ts,
+            n.text,
+            n.request_id,
+            n.context_tokens,
+            int(n.is_branch_point),
         )
-        for t in turns
+        for n in nodes
     ]
     if not rows:
         return
     conn.executemany(
-        "INSERT OR REPLACE INTO turn (sendero_id, uuid, parent_uuid, seq, role, ts, text,"
+        "INSERT OR REPLACE INTO node (sendero_id, uuid, parent_uuid, seq, role, ts, text,"
         " request_id, context_tokens, is_branch_point) VALUES (?,?,?,?,?,?,?,?,?,?)",
         rows,
     )
@@ -191,7 +186,7 @@ def forget(conn: sqlite3.Connection, sendero_ids: Iterable[str]) -> int:
     ids = [(i,) for i in sendero_ids]
     if not ids:
         return 0
-    conn.executemany("DELETE FROM turn WHERE sendero_id = ?", ids)
+    conn.executemany("DELETE FROM node WHERE sendero_id = ?", ids)
     conn.executemany("DELETE FROM compaction WHERE sendero_id = ?", ids)
     conn.executemany(
         "DELETE FROM sendero_edge WHERE child = ? OR parent = ?", [(i, i) for (i,) in ids]
@@ -201,7 +196,8 @@ def forget(conn: sqlite3.Connection, sendero_ids: Iterable[str]) -> int:
 
 
 def reindex_fts(conn: sqlite3.Connection) -> None:
-    conn.execute("INSERT INTO turn_fts (turn_fts) VALUES ('rebuild')")
+    """Silent nodes carry no text, so they sit in the index inert and match nothing."""
+    conn.execute("INSERT INTO node_fts (node_fts) VALUES ('rebuild')")
 
 
 def _adapt(value: object) -> object:
