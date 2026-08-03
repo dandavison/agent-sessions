@@ -6,8 +6,8 @@ import orjson
 import pytest
 from conftest import assistant, last_prompt, text_block, user
 
-from senderos import db, index, wormhole
-from senderos.sources.claude import ClaudeSource
+from agent_sessions import db, index, wormhole
+from agent_sessions.sources.claude import ClaudeSource
 
 SESSION = "7e90a7c6-ce43-4dfd-9d7c-8eb01ac7ccf2"
 OTHER = "0f9442bd-bdae-41e7-91b5-cd6da55deb95"
@@ -57,7 +57,7 @@ def test_sync_indexes_a_transcript(projects: Path, tmp_path: Path) -> None:
 
     assert result.indexed == 1
     assert result.nodes == 2
-    row = conn.execute("SELECT * FROM sendero").fetchone()
+    row = conn.execute("SELECT * FROM session").fetchone()
     assert row["id"] == f"claude:{SESSION}"
     assert row["n_user_turns"] == 1
 
@@ -66,7 +66,7 @@ def test_sync_attributes_to_a_wormhole_project(projects: Path, tmp_path: Path) -
     write(projects, conversation())
     conn = db.connect(tmp_path / "index.db")
     index.sync(conn)
-    assert conn.execute("SELECT project FROM sendero").fetchone()[0] == "wormhole"
+    assert conn.execute("SELECT project FROM session").fetchone()[0] == "wormhole"
 
 
 def test_sync_leaves_unknown_paths_unattributed(projects: Path, tmp_path: Path) -> None:
@@ -77,7 +77,7 @@ def test_sync_leaves_unknown_paths_unattributed(projects: Path, tmp_path: Path) 
     write(projects, records)
     conn = db.connect(tmp_path / "index.db")
     index.sync(conn)
-    assert conn.execute("SELECT project FROM sendero").fetchone()[0] is None
+    assert conn.execute("SELECT project FROM session").fetchone()[0] is None
 
 
 def test_sync_is_idempotent(projects: Path, tmp_path: Path) -> None:
@@ -88,7 +88,7 @@ def test_sync_is_idempotent(projects: Path, tmp_path: Path) -> None:
     second = index.sync(conn)
 
     assert first == second
-    assert conn.execute("SELECT count(*) FROM sendero").fetchone()[0] == 1
+    assert conn.execute("SELECT count(*) FROM session").fetchone()[0] == 1
     assert conn.execute("SELECT count(*) FROM node").fetchone()[0] == 2
 
 
@@ -100,7 +100,7 @@ def test_sync_picks_up_appended_records(projects: Path, tmp_path: Path) -> None:
     write(projects, [*conversation(), user("u2", "a1", "and now this"), last_prompt("u2")])
     index.sync(conn)
 
-    assert conn.execute("SELECT n_user_turns FROM sendero").fetchone()[0] == 2
+    assert conn.execute("SELECT n_user_turns FROM session").fetchone()[0] == 2
 
 
 def test_sync_counts_sidecar_only_transcripts_as_skipped(projects: Path, tmp_path: Path) -> None:
@@ -123,7 +123,7 @@ def test_sync_forgets_a_deleted_transcript(projects: Path, tmp_path: Path) -> No
     result = index.sync(conn)
 
     assert result.forgotten == 1
-    assert conn.execute("SELECT count(*) FROM sendero").fetchone()[0] == 1
+    assert conn.execute("SELECT count(*) FROM session").fetchone()[0] == 1
     assert conn.execute("SELECT count(*) FROM node").fetchone()[0] == 2
 
 
@@ -187,7 +187,7 @@ def test_stale_notices_a_deleted_transcript(projects: Path, tmp_path: Path) -> N
     assert index.stale(conn) == 1
 
 
-def test_the_same_session_in_two_project_dirs_is_one_sendero(
+def test_the_same_session_in_two_project_dirs_is_one_session(
     projects: Path, tmp_path: Path
 ) -> None:
     """Converting a Cursor conversation writes the same session into two dirs."""
@@ -202,14 +202,14 @@ def test_the_same_session_in_two_project_dirs_is_one_sendero(
     result = index.sync(conn)
 
     assert (result.indexed, result.duplicated) == (1, 1)
-    assert conn.execute("SELECT count(*) FROM sendero").fetchone()[0] == 1
+    assert conn.execute("SELECT count(*) FROM session").fetchone()[0] == 1
 
 
-def test_indexed_counts_senderos_not_files(projects: Path, tmp_path: Path) -> None:
+def test_indexed_counts_sessions_not_files(projects: Path, tmp_path: Path) -> None:
     write(projects, conversation())
     write(projects, conversation("another"), session=OTHER)
     conn = db.connect(tmp_path / "index.db")
 
     result = index.sync(conn)
 
-    assert result.indexed == conn.execute("SELECT count(*) FROM sendero").fetchone()[0] == 2
+    assert result.indexed == conn.execute("SELECT count(*) FROM session").fetchone()[0] == 2

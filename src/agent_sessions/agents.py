@@ -9,7 +9,7 @@ import os
 import shutil
 from pathlib import Path
 
-from senderos import skill
+from agent_sessions import skill
 
 # pi has no default model of its own, so the one it is pointed at is named
 # here, as provider/id; qwen takes its model from its own settings.

@@ -1,4 +1,4 @@
-"""The senderos command line."""
+"""The agent-sessions command line."""
 
 import sqlite3
 import sys
@@ -8,10 +8,10 @@ from pathlib import Path
 
 import click
 
-from senderos import agents, db, index, query, render, skill, topology, wormhole
-from senderos.agents import NotInstalled
-from senderos.render import Format, Renderer
-from senderos.wormhole import WormholeUnavailable
+from agent_sessions import agents, db, index, query, render, skill, topology, wormhole
+from agent_sessions.agents import NotInstalled
+from agent_sessions.render import Format, Renderer
+from agent_sessions.wormhole import WormholeUnavailable
 
 EXIT_NO_RESULTS = 1
 EXIT_USAGE = 2
@@ -51,22 +51,21 @@ def renderer(fmt: str | None, as_json: bool, quiet: bool) -> Renderer:
     context_settings={"help_option_names": ["-h", "--help"]},
     epilog="""\b
 Examples
-  $ senderos sync
-  $ senderos search "worktree relocation" -p wormhole
-  $ senderos ls -p temporal --since 2w
-  $ senderos show claude:7e90a7c6 --turns
-  $ senderos tree claude:7e90a7c6
-  $ senderos cat claude:7e90a7c6 --tools
-  $ senderos resume claude:7e90a7c6
+  $ agent-sessions sync
+  $ agent-sessions search "worktree relocation" -p wormhole
+  $ agent-sessions ls -p temporal --since 2w
+  $ agent-sessions show claude:7e90a7c6 --turns
+  $ agent-sessions tree claude:7e90a7c6
+  $ agent-sessions cat claude:7e90a7c6 --tools
+  $ agent-sessions resume claude:7e90a7c6
 """,
 )
 @click.version_option()
 def main() -> None:
-    """Index and resume the work you have done with coding agents.
+    """Find and resume the sessions you have had with coding agents.
 
-    A sendero is one unit of that work: a durable, branching, resumable piece of
-    it. `sync` brings the index up to date with the transcript files on disk;
-    every other command reads.
+    `sync` brings the index up to date with the transcript files on disk; every
+    other command reads.
     """
 
 
@@ -97,24 +96,24 @@ def sync(agents: tuple[str, ...], fmt: str | None, as_json: bool, quiet: bool) -
             "forgotten": result.forgotten,
         }
     )
-    out.hint('Next: senderos search "<words>" | senderos ls -p <project> --since 2w')
+    out.hint('Next: agent-sessions search "<words>" | agent-sessions ls -p <project> --since 2w')
 
 
 @main.command()
 @format_option
 def status(fmt: str | None, as_json: bool, quiet: bool) -> None:
-    """Report index health: sendero counts, and whether a sync is due."""
+    """Report index health: session counts, and whether a sync is due."""
     out = renderer(fmt, as_json, quiet)
     conn = db.connect()
-    total = conn.execute("SELECT count(*) FROM sendero").fetchone()[0]
+    total = conn.execute("SELECT count(*) FROM session").fetchone()[0]
     by_agent = conn.execute(
-        "SELECT agent, count(*) AS n FROM sendero GROUP BY agent ORDER BY n DESC"
+        "SELECT agent, count(*) AS n FROM session GROUP BY agent ORDER BY n DESC"
     ).fetchall()
     changed = index.stale(conn)
     out.record(
         {
             "db": str(db.DB_PATH),
-            "senderos": total,
+            "sessions": total,
             **{row["agent"]: row["n"] for row in by_agent},
             "synced_at": _ago(db.synced_at(conn)),
             "changed_since": changed,
@@ -129,8 +128,10 @@ def filter_options(f):
             click.option(
                 "--agent", type=click.Choice(sorted(index.SOURCES)), help="Only this agent."
             ),
-            click.option("--since", help="Only senderos touched within e.g. 36h, 10d, 2w."),
-            click.option("--min-context", help="Only senderos whose context reached e.g. 500k."),
+            click.option("--since", help="Only agent-sessions touched within e.g. 36h, 10d, 2w."),
+            click.option(
+                "--min-context", help="Only agent-sessions whose context reached e.g. 500k."
+            ),
             click.option(
                 "-n", "--limit", type=int, default=20, show_default=True, help="How many at most."
             ),
@@ -147,36 +148,36 @@ def filters(project, agent, since, min_context) -> query.Filters:
 @main.command(
     epilog="""\b
 Examples
-  $ senderos search compaction                    # case-insensitive, and stemmed:
+  $ agent-sessions search compaction                    # case-insensitive, and stemmed:
                                                   # matches Compaction, compacted
-  $ senderos search "worktree relocation"         # both words, in any order
-  $ senderos search '"worktree relocation"'       # the exact phrase
-  $ senderos search 'nexus OR chasm'              # either
-  $ senderos search 'activity NOT workflow'       # one but not the other
-  $ senderos search 'reloc*'                      # prefix of the STEM: relocat*
+  $ agent-sessions search "worktree relocation"         # both words, in any order
+  $ agent-sessions search '"worktree relocation"'       # the exact phrase
+  $ agent-sessions search 'nexus OR chasm'              # either
+  $ agent-sessions search 'activity NOT workflow'       # one but not the other
+  $ agent-sessions search 'reloc*'                      # prefix of the STEM: relocat*
                                                   # would find nothing
-  $ senderos search compaction -p temporal --since 2w
-  $ senderos search compaction --min-context 500k -n 5
-  $ senderos search compaction -q | head -1       # bare id, to pipe
+  $ agent-sessions search compaction -p temporal --since 2w
+  $ agent-sessions search compaction --min-context 500k -n 5
+  $ agent-sessions search compaction -q | head -1       # bare id, to pipe
 """
 )
 @click.argument("query_text", metavar="QUERY")
 @filter_options
 @format_option
 def search(query_text, project, agent, since, min_context, limit, fmt, as_json, quiet) -> None:
-    """Find senderos whose text matches QUERY. Best match first, one per line.
+    """Find agent-sessions whose text matches QUERY. Best match first, one per line.
 
     Matching is case-insensitive and stemmed, so `relocate` finds "relocating".
     QUERY is SQLite FTS5 syntax: bare words are ANDed, "quoted phrases" are
     literal, and OR / NOT work as expected. Ranking blends how well the text
-    matches with how recent the sendero is.
+    matches with how recent the session is.
 
     Stemming makes prefix search a trap: "relocating" is stored as `reloc`, so
     `reloc*` matches it and `relocat*` does not. Stemming usually covers what
     you wanted a prefix for anyway.
 
     Tool calls and their output are deliberately not indexed, so this searches
-    what was said, not what was run. Use `senderos cat --tools` for those.
+    what was said, not what was run. Use `agent-sessions cat --tools` for those.
     """
     out = renderer(fmt, as_json, quiet)
     conn = db.connect()
@@ -199,8 +200,8 @@ def search(query_text, project, agent, since, min_context, limit, fmt, as_json, 
     help="Order by recency, peak context, or number of turns.",
 )
 @format_option
-def list_senderos(project, agent, since, min_context, limit, sort, fmt, as_json, quiet) -> None:
-    """List senderos, most recent first. No text matching; use `search` for that."""
+def list_sessions(project, agent, since, min_context, limit, sort, fmt, as_json, quiet) -> None:
+    """List sessions, most recent first. No text matching; use `search` for that."""
     out = renderer(fmt, as_json, quiet)
     conn = db.connect()
     found = query.recent(conn, filters(project, agent, since, min_context), sort, limit)
@@ -214,31 +215,31 @@ def list_senderos(project, agent, since, min_context, limit, sort, fmt, as_json,
 @click.option("--turns", "turns_only", is_flag=True, help="Just my turns, without the header.")
 @format_option
 def show(id: str, turns_only: bool, fmt: str | None, as_json: bool, quiet: bool) -> None:
-    """Show one sendero and the history of my turns in it.
+    """Show one session and the history of my turns in it.
 
     Each turn carries the context size at that point, so it is visible where
-    the sendero grew expensive and where compaction cut it back.
+    the session grew expensive and where compaction cut it back.
     """
     out = renderer(fmt, as_json, quiet)
     conn = db.connect()
-    sendero = _resolve(conn, id)
-    said = query.turns(conn, sendero["id"])
+    session = _resolve(conn, id)
+    said = query.turns(conn, session["id"])
 
     if as_json:
-        out.record(dict(sendero) | {"turns": said})
+        out.record(dict(session) | {"turns": said})
         return
     if not turns_only:
-        out.record(_details(sendero))
+        out.record(_details(session))
         out.line("")
     out.table([_turn(t) for t in said], quiet_key="uuid")
-    _next(out, sendero["id"], "cat {id} --tools", "tree", "resume", "resume --fork")
+    _next(out, session["id"], "cat {id} --tools", "tree", "resume", "resume --fork")
 
 
 @main.command()
 @click.argument("id")
 @format_option
 def tree(id: str, fmt: str | None, as_json: bool, quiet: bool) -> None:
-    """Show where a sendero branched, where it was compacted, and what forked off it.
+    """Show where a session branched, where it was compacted, and what forked off it.
 
     Long runs where nothing was decided collapse to one line each, so what is
     left is the shape. Compaction starts a new root, because the boundary record
@@ -246,20 +247,20 @@ def tree(id: str, fmt: str | None, as_json: bool, quiet: bool) -> None:
     """
     out = renderer(fmt, as_json, quiet)
     conn = db.connect()
-    sendero = _resolve(conn, id)
-    shape = topology.of(conn, sendero)
+    session = _resolve(conn, id)
+    shape = topology.of(conn, session)
 
     if as_json:
-        out.record({"id": sendero["id"], **asdict(shape)})
+        out.record({"id": session["id"], **asdict(shape)})
         return
-    out.line(f"{sendero['id']}  {sendero['project'] or '-'}  {sendero['title'] or ''}")
+    out.line(f"{session['id']}  {session['project'] or '-'}  {session['title'] or ''}")
     if origin := shape.forked_from:
         out.line(f"  forked from {origin['parent']} at {_short(origin['at_uuid'])}")
     for i, root in enumerate(shape.roots):
         _draw(out, root, prefix="", last=i == len(shape.roots) - 1)
     for fork in shape.forks:
         out.line(f"  fork → {fork['child']} at {_short(fork['at_uuid'])}")
-    _next(out, sendero["id"], "show {id} --turns", "cat --tools", "resume")
+    _next(out, session["id"], "show {id} --turns", "cat --tools", "resume")
 
 
 def _draw(out: Renderer, segment: topology.Segment, prefix: str, last: bool) -> None:
@@ -298,17 +299,17 @@ def _short(uuid: str | None) -> str:
 @click.option("--tools", is_flag=True, help="Include tool calls and their output.")
 @click.option("--whole", is_flag=True, help="Include branches that were abandoned.")
 def cat(id: str, tools: bool, whole: bool) -> None:
-    """Print a sendero as markdown, read from the transcript itself.
+    """Print a session as markdown, read from the transcript itself.
 
     Not from the index, which holds no tool output: `--tools` is the only way
     to see what was actually run.
     """
     conn = db.connect()
-    sendero = _resolve(conn, id)
-    source = index.SOURCES[sendero["agent"]]
-    path = Path(sendero["path"])
+    session = _resolve(conn, id)
+    source = index.SOURCES[session["agent"]]
+    path = Path(session["path"])
     if not path.exists():
-        raise click.UsageError(f"{path} is gone. Run `senderos sync`.")
+        raise click.UsageError(f"{path} is gone. Run `agent-sessions sync`.")
     for chunk in source.render(path, tools=tools, whole=whole):
         sys.stdout.write(chunk)
 
@@ -318,7 +319,7 @@ def cat(id: str, tools: bool, whole: bool) -> None:
 @click.option("--fork", is_flag=True, help="Branch into a new session, leaving this one as it is.")
 @format_option
 def resume(id: str, fork: bool, fmt: str | None, as_json: bool, quiet: bool) -> None:
-    """Pick a sendero back up, in the worktree it belongs to.
+    """Pick a session back up, in the worktree it belongs to.
 
     A session that is already running is not started again: you are taken to
     the pane it is sitting in, whoever started it. Otherwise wormhole splits a
@@ -326,24 +327,24 @@ def resume(id: str, fork: bool, fmt: str | None, as_json: bool, quiet: bool) -> 
     """
     out = renderer(fmt, as_json, quiet)
     conn = db.connect()
-    sendero = _resolve(conn, id)
-    if not sendero["project"]:
+    session = _resolve(conn, id)
+    if not session["project"]:
         raise click.UsageError(
-            f"{sendero['id']} has no project: its cwd was {sendero['cwd']}."
+            f"{session['id']} has no project: its cwd was {session['cwd']}."
             " There is nowhere to resume it."
         )
 
-    running = index.SOURCES[sendero["agent"]].live().get(sendero["native_id"])
+    running = index.SOURCES[session["agent"]].live().get(session["native_id"])
     wormhole.resume(
-        sendero["project"],
-        sendero["native_id"],
+        session["project"],
+        session["native_id"],
         fork=fork,
         pid=running.pid if running else None,
     )
     out.record(
         {
-            "id": sendero["id"],
-            "project": sendero["project"],
+            "id": session["id"],
+            "project": session["project"],
             "forked": fork,
             "was_running": running.status if running else "",
         }
@@ -357,10 +358,10 @@ def resume(id: str, fork: bool, fmt: str | None, as_json: bool, quiet: bool) -> 
 @main.command(
     epilog="""\b
 Examples
-  $ senderos agent                                    # pi, knowing this tool
-  $ senderos agent --with qwen
-  $ senderos agent --model anthropic/claude-opus-5
-  $ senderos agent "pick up the compaction work"      # with a first message
+  $ agent-sessions agent                                    # pi, knowing this tool
+  $ agent-sessions agent --with qwen
+  $ agent-sessions agent --model anthropic/claude-opus-5
+  $ agent-sessions agent "pick up the compaction work"      # with a first message
 """
 )
 @click.option(
@@ -374,7 +375,7 @@ Examples
 @click.option("--model", help="Which model it should run, named as that agent names it.")
 @click.argument("prompt", required=False)
 def agent(program: str, model: str | None, prompt: str | None) -> None:
-    """Start a coding agent with the senderos skill loaded.
+    """Start a coding agent with the agent-sessions skill loaded.
 
     The skill is written out first, so the agent can find past work from its
     first call. This process is replaced by the agent, in the current directory.
@@ -384,7 +385,7 @@ def agent(program: str, model: str | None, prompt: str | None) -> None:
 
 @main.group(name="skills")
 def skills_group() -> None:
-    """Manage the senderos skill, so an agent knows this tool from turn one."""
+    """Manage the agent-sessions skill, so an agent knows this tool from turn one."""
 
 
 @skills_group.command(name="add")
@@ -403,12 +404,12 @@ def skills_preview() -> None:
 
 
 def _resolve(conn: sqlite3.Connection, id: str) -> dict:
-    sendero = query.get(conn, id)
-    if sendero is None:
+    session = query.get(conn, id)
+    if session is None:
         raise click.UsageError(
-            f"no single sendero matches {id!r}. Try `senderos search` or a longer prefix."
+            f"no single session matches {id!r}. Try `agent-sessions search` or a longer prefix."
         )
-    return sendero
+    return session
 
 
 def _report(out: Renderer, rows: list[dict]) -> None:
@@ -424,7 +425,7 @@ def _next(out: Renderer, id: str, ready: str, *others: str) -> None:
     three times would not: one runnable command and the other verbs is
     enough to act on.
     """
-    out.hint(f"Next: senderos {ready.format(id=id)}   (also: {', '.join(others)})")
+    out.hint(f"Next: agent-sessions {ready.format(id=id)}   (also: {', '.join(others)})")
 
 
 def _row(s: dict) -> dict:

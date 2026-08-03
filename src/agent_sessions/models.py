@@ -1,4 +1,4 @@
-"""The shape of a sendero, independent of which agent produced it."""
+"""The shape of a session, independent of which agent produced it."""
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,7 +15,7 @@ class Discovered:
 
 
 @dataclass(slots=True)
-class Sendero:
+class Session:
     id: str
     agent: str
     native_id: str
@@ -47,7 +47,7 @@ class Node:
     branch. `text` is empty for the silent ones, and only prose reaches search.
     """
 
-    sendero_id: str
+    session_id: str
     uuid: str
     parent_uuid: str | None
     seq: int
@@ -61,7 +61,7 @@ class Node:
 
 @dataclass(frozen=True, slots=True)
 class Edge:
-    """A link between two senderos. Currently only `fork`."""
+    """A link between two sessions. Currently only `fork`."""
 
     child: str
     parent: str
@@ -79,7 +79,7 @@ class Running:
 
 @dataclass(frozen=True, slots=True)
 class Compaction:
-    sendero_id: str
+    session_id: str
     uuid: str
     ts: int | None
     trigger: str
@@ -94,7 +94,7 @@ class Compaction:
 class Delta:
     """Everything one transcript file contributed to the index."""
 
-    sendero: Sendero
+    session: Session
     nodes: list[Node] = field(default_factory=list)
     edges: list[Edge] = field(default_factory=list)
     compactions: list[Compaction] = field(default_factory=list)

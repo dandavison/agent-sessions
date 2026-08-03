@@ -3,15 +3,15 @@ from pathlib import Path
 
 import pytest
 
-from senderos import db, query
-from senderos.models import Node, Sendero
+from agent_sessions import db, query
+from agent_sessions.models import Node, Session
 
 NOW = int(time.time())
 DAY = 86400
 
 
-def sendero(id: str, **kw) -> Sendero:
-    return Sendero(
+def session(id: str, **kw) -> Session:
+    return Session(
         id=id,
         agent=kw.pop("agent", "claude"),
         native_id=id.split(":")[1],
@@ -21,9 +21,9 @@ def sendero(id: str, **kw) -> Sendero:
     )
 
 
-def populate(conn, senderos: list[Sendero], nodes: list[Node]) -> None:
-    for s in senderos:
-        db.write_sendero(conn, s)
+def populate(conn, sessions: list[Session], nodes: list[Node]) -> None:
+    for s in sessions:
+        db.write_session(conn, s)
     db.write_nodes(conn, nodes)
     db.reindex_fts(conn)
     conn.commit()
@@ -70,9 +70,9 @@ def three(conn) -> None:
     populate(
         conn,
         [
-            sendero("claude:a", project="wormhole", context_tokens=500_000),
-            sendero("claude:b", project="temporal:dan/x", ended_at=NOW - 30 * DAY),
-            sendero("claude:c", project="temporal", context_tokens=10_000),
+            session("claude:a", project="wormhole", context_tokens=500_000),
+            session("claude:b", project="temporal:dan/x", ended_at=NOW - 30 * DAY),
+            session("claude:c", project="temporal", context_tokens=10_000),
         ],
         [],
     )
@@ -90,7 +90,7 @@ def test_project_filter_includes_tasks_of_that_repo(conn) -> None:
 
 def test_project_filter_is_not_a_prefix_match(conn) -> None:
     """`-p temporal` must not sweep in a differently named repo like temporalio."""
-    populate(conn, [sendero("claude:d", project="temporalio")], [])
+    populate(conn, [session("claude:d", project="temporalio")], [])
     assert query.recent(conn, query.Filters(project="temporal"), "recent", 10) == []
 
 
@@ -126,9 +126,9 @@ def corpus(conn) -> None:
     populate(
         conn,
         [
-            sendero("claude:old", project="wormhole", ended_at=NOW - 150 * DAY),
-            sendero("claude:new", project="wormhole"),
-            sendero("claude:other", project="temporal"),
+            session("claude:old", project="wormhole", ended_at=NOW - 150 * DAY),
+            session("claude:new", project="wormhole"),
+            session("claude:other", project="temporal"),
         ],
         [
             Node("claude:old", "o1", None, 0, "user", NOW, "worktree relocation, at length"),
@@ -140,7 +140,7 @@ def corpus(conn) -> None:
     )
 
 
-def test_search_finds_matching_senderos(conn) -> None:
+def test_search_finds_matching_sessions(conn) -> None:
     corpus(conn)
     assert ids(query.search(conn, "relocation", query.Filters(), 10)) == {
         "claude:old",
@@ -148,7 +148,7 @@ def test_search_finds_matching_senderos(conn) -> None:
     }
 
 
-def test_search_returns_one_row_per_sendero(conn) -> None:
+def test_search_returns_one_row_per_session(conn) -> None:
     """`old` matches twice; it should still appear once, with its best node."""
     corpus(conn)
     hits = query.search(conn, "relocation", query.Filters(), 10)
@@ -190,9 +190,9 @@ def test_search_matches_nothing_when_nothing_matches(conn) -> None:
 
 
 def found_id(conn, given: str) -> str:
-    sendero = query.get(conn, given)
-    assert sendero is not None
-    return sendero["id"]
+    session = query.get(conn, given)
+    assert session is not None
+    return session["id"]
 
 
 def test_get_by_full_id(conn) -> None:
@@ -206,13 +206,13 @@ def test_get_by_bare_native_id(conn) -> None:
 
 
 def test_get_by_unambiguous_prefix(conn) -> None:
-    populate(conn, [sendero("claude:7daebc42-3ff5")], [])
+    populate(conn, [session("claude:7daebc42-3ff5")], [])
     assert found_id(conn, "claude:7dae") == "claude:7daebc42-3ff5"
     assert found_id(conn, "7dae") == "claude:7daebc42-3ff5"
 
 
 def test_get_refuses_an_ambiguous_prefix(conn) -> None:
-    populate(conn, [sendero("claude:ab1"), sendero("claude:ab2")], [])
+    populate(conn, [session("claude:ab1"), session("claude:ab2")], [])
     assert query.get(conn, "claude:ab") is None
 
 
@@ -227,7 +227,7 @@ def test_get_of_something_absent(conn) -> None:
 def test_turns_are_mine_in_order(conn) -> None:
     populate(
         conn,
-        [sendero("claude:a")],
+        [session("claude:a")],
         [
             Node("claude:a", "u1", None, 0, "user", 1, "first"),
             Node("claude:a", "a1", "u1", 1, "assistant", 2, "a reply"),
@@ -242,7 +242,7 @@ def test_a_compact_summary_counts_as_a_turn(conn) -> None:
     """It is the only surviving record of everything compaction dropped."""
     populate(
         conn,
-        [sendero("claude:a")],
+        [session("claude:a")],
         [
             Node("claude:a", "s1", None, 0, "summary", 1, "Summary: earlier work on worktrees."),
             Node("claude:a", "u1", "s1", 1, "user", 2, "carry on"),
@@ -255,7 +255,7 @@ def test_each_turn_reports_the_context_of_the_reply_it_drew(conn) -> None:
     """A user record has no usage of its own; only the model's replies do."""
     populate(
         conn,
-        [sendero("claude:a")],
+        [session("claude:a")],
         [
             Node("claude:a", "u1", None, 0, "user", 1, "first"),
             Node("claude:a", "a1", "u1", 1, "assistant", 2, "reply", context_tokens=1000),
@@ -269,7 +269,7 @@ def test_each_turn_reports_the_context_of_the_reply_it_drew(conn) -> None:
 def test_a_turn_with_no_reply_yet_has_no_context(conn) -> None:
     populate(
         conn,
-        [sendero("claude:a")],
+        [session("claude:a")],
         [Node("claude:a", "u1", None, 0, "user", 1, "asked, never answered")],
     )
     assert query.turns(conn, "claude:a")[0]["context_tokens"] is None
@@ -280,8 +280,8 @@ def test_an_old_match_still_wins_if_recent_ones_are_much_worse(conn) -> None:
     populate(
         conn,
         [
-            sendero("claude:old", ended_at=NOW - 150 * DAY),
-            sendero("claude:new"),
+            session("claude:old", ended_at=NOW - 150 * DAY),
+            session("claude:new"),
         ],
         [
             Node("claude:old", "o1", None, 0, "user", NOW, "kangaroo kangaroo kangaroo kangaroo"),
@@ -305,7 +305,7 @@ def test_an_old_match_still_wins_if_recent_ones_are_much_worse(conn) -> None:
 def stemming_corpus(conn) -> None:
     populate(
         conn,
-        [sendero("claude:a")],
+        [session("claude:a")],
         [Node("claude:a", "u1", None, 0, "user", NOW, "Relocating the Worktrees")],
     )
 

@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from senderos import cli, db, query
-from senderos.models import Node, Sendero
+from agent_sessions import cli, db, query
+from agent_sessions.models import Node, Session
 
 ID = "claude:7e90a7c6-ce43-4dfd-9d7c-8eb01ac7ccf2"
 
@@ -14,9 +14,9 @@ ID = "claude:7e90a7c6-ce43-4dfd-9d7c-8eb01ac7ccf2"
 def indexed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     path = tmp_path / "index.db"
     conn = db.connect(path)
-    db.write_sendero(
+    db.write_session(
         conn,
-        Sendero(
+        Session(
             id=ID,
             agent="claude",
             native_id=ID.split(":")[1],
@@ -73,7 +73,7 @@ def run(capsys: pytest.CaptureFixture[str]):
 def test_no_command_suggests_syncing(indexed: Path, run, args: tuple[str, ...]) -> None:
     """Syncing is the user's call. Suggesting it costs the agent a tool call."""
     _, out, err = run(*args)
-    assert "senderos sync" not in out + err
+    assert "agent-sessions sync" not in out + err
 
 
 def test_status_still_reports_staleness_as_a_fact(indexed: Path, run) -> None:
@@ -89,12 +89,12 @@ def test_finding_something_names_the_next_command(
     indexed: Path, run, args: tuple[str, ...]
 ) -> None:
     _, _, err = run(*args)
-    assert f"Next: senderos show {ID} --turns" in err
+    assert f"Next: agent-sessions show {ID} --turns" in err
 
 
 def test_show_names_what_comes_after_it(indexed: Path, run) -> None:
     _, _, err = run("show", ID)
-    assert f"senderos cat {ID} --tools" in err
+    assert f"agent-sessions cat {ID} --tools" in err
 
 
 def test_the_next_command_carries_a_real_id_not_a_placeholder(indexed: Path, run) -> None:
@@ -107,7 +107,7 @@ def test_the_next_command_carries_a_real_id_not_a_placeholder(indexed: Path, run
 def test_the_next_command_is_one_this_tool_accepts(indexed: Path, run) -> None:
     """Follow the hint literally and it must work."""
     _, _, err = run("search", "relocating")
-    suggested = err.split("Next: senderos ")[1].split("   (")[0].split()
+    suggested = err.split("Next: agent-sessions ")[1].split("   (")[0].split()
     code, out, _ = run(*suggested)
     assert code == 0
     assert "relocating" in out
@@ -184,3 +184,10 @@ def test_a_malformed_duration_is_a_usage_error(indexed: Path, run) -> None:
 def test_sorts_are_offered_by_name(indexed: Path, run) -> None:
     for sort in query.SORTS:
         assert run("ls", "--sort", sort)[0] == 0
+
+
+def test_status_counts_sessions_not_the_tool(indexed: Path, run) -> None:
+    """The row is a count of sessions; naming it after the command reads as nonsense."""
+    _, out, _ = run("status")
+    assert "sessions " in out
+    assert "agent-sessions " not in out

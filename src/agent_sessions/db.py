@@ -4,16 +4,16 @@ import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
 
-from senderos.models import Compaction, Edge, Node, Sendero
+from agent_sessions.models import Compaction, Edge, Node, Session
 
 SCHEMA_VERSION = 1
 
-DB_PATH = Path.home() / ".senderos" / "index.db"
+DB_PATH = Path.home() / ".agent-sessions" / "index.db"
 
 SCHEMA = """
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
-CREATE TABLE sendero (
+CREATE TABLE session (
   id             TEXT PRIMARY KEY,
   agent          TEXT NOT NULL,
   native_id      TEXT NOT NULL,
@@ -35,12 +35,12 @@ CREATE TABLE sendero (
   session_kind   TEXT,
   file_mtime     INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX sendero_ended_at ON sendero (ended_at DESC);
-CREATE INDEX sendero_project ON sendero (project);
-CREATE UNIQUE INDEX sendero_path ON sendero (path);
+CREATE INDEX session_ended_at ON session (ended_at DESC);
+CREATE INDEX session_project ON session (project);
+CREATE UNIQUE INDEX session_path ON session (path);
 
 CREATE TABLE node (
-  sendero_id      TEXT NOT NULL REFERENCES sendero (id) ON DELETE CASCADE,
+  session_id      TEXT NOT NULL REFERENCES session (id) ON DELETE CASCADE,
   uuid            TEXT PRIMARY KEY,
   parent_uuid     TEXT,
   seq             INTEGER NOT NULL,
@@ -51,19 +51,19 @@ CREATE TABLE node (
   context_tokens  INTEGER NOT NULL DEFAULT 0,
   is_branch_point INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX node_sendero ON node (sendero_id, seq);
+CREATE INDEX node_session ON node (session_id, seq);
 
-CREATE TABLE sendero_edge (
+CREATE TABLE session_edge (
   child   TEXT NOT NULL,
   parent  TEXT NOT NULL,
   kind    TEXT NOT NULL,
   at_uuid TEXT,
   PRIMARY KEY (child, parent, kind)
 );
-CREATE INDEX sendero_edge_parent ON sendero_edge (parent);
+CREATE INDEX session_edge_parent ON session_edge (parent);
 
 CREATE TABLE compaction (
-  sendero_id          TEXT NOT NULL REFERENCES sendero (id) ON DELETE CASCADE,
+  session_id          TEXT NOT NULL REFERENCES session (id) ON DELETE CASCADE,
   uuid                TEXT PRIMARY KEY,
   ts                  INTEGER,
   trigger             TEXT,
@@ -73,7 +73,7 @@ CREATE TABLE compaction (
   anchor_uuid         TEXT,
   preserved_count     INTEGER
 );
-CREATE INDEX compaction_sendero ON compaction (sendero_id);
+CREATE INDEX compaction_session ON compaction (session_id);
 
 CREATE VIRTUAL TABLE node_fts USING fts5 (
   text,
@@ -113,7 +113,7 @@ def _rebuild(conn: sqlite3.Connection) -> None:
 
 
 def indexed_paths(conn: sqlite3.Connection) -> set[str]:
-    return {row["path"] for row in conn.execute("SELECT path FROM sendero")}
+    return {row["path"] for row in conn.execute("SELECT path FROM session")}
 
 
 def synced_at(conn: sqlite3.Connection) -> int | None:
@@ -125,11 +125,11 @@ def set_synced_at(conn: sqlite3.Connection, when: int) -> None:
     conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('synced_at', ?)", (str(when),))
 
 
-def write_sendero(conn: sqlite3.Connection, s: Sendero) -> None:
-    columns = [f.name for f in Sendero.__dataclass_fields__.values()]
+def write_session(conn: sqlite3.Connection, s: Session) -> None:
+    columns = [f.name for f in Session.__dataclass_fields__.values()]
     placeholders = ", ".join(f":{c}" for c in columns)
     conn.execute(
-        f"INSERT OR REPLACE INTO sendero ({', '.join(columns)}) VALUES ({placeholders})",
+        f"INSERT OR REPLACE INTO session ({', '.join(columns)}) VALUES ({placeholders})",
         {c: _adapt(getattr(s, c)) for c in columns},
     )
 
@@ -137,7 +137,7 @@ def write_sendero(conn: sqlite3.Connection, s: Sendero) -> None:
 def write_nodes(conn: sqlite3.Connection, nodes: Iterable[Node]) -> None:
     rows = [
         (
-            n.sendero_id,
+            n.session_id,
             n.uuid,
             n.parent_uuid,
             n.seq,
@@ -153,7 +153,7 @@ def write_nodes(conn: sqlite3.Connection, nodes: Iterable[Node]) -> None:
     if not rows:
         return
     conn.executemany(
-        "INSERT OR REPLACE INTO node (sendero_id, uuid, parent_uuid, seq, role, ts, text,"
+        "INSERT OR REPLACE INTO node (session_id, uuid, parent_uuid, seq, role, ts, text,"
         " request_id, context_tokens, is_branch_point) VALUES (?,?,?,?,?,?,?,?,?,?)",
         rows,
     )
@@ -163,7 +163,7 @@ def write_edges(conn: sqlite3.Connection, edges: Iterable[Edge]) -> None:
     rows = [(e.child, e.parent, e.kind, e.at_uuid) for e in edges]
     if rows:
         conn.executemany(
-            "INSERT OR REPLACE INTO sendero_edge (child, parent, kind, at_uuid) VALUES (?,?,?,?)",
+            "INSERT OR REPLACE INTO session_edge (child, parent, kind, at_uuid) VALUES (?,?,?,?)",
             rows,
         )
 
@@ -171,7 +171,7 @@ def write_edges(conn: sqlite3.Connection, edges: Iterable[Edge]) -> None:
 def write_compactions(conn: sqlite3.Connection, compactions: Iterable[Compaction]) -> None:
     rows = [
         (
-            c.sendero_id,
+            c.session_id,
             c.uuid,
             c.ts,
             c.trigger,
@@ -185,24 +185,24 @@ def write_compactions(conn: sqlite3.Connection, compactions: Iterable[Compaction
     ]
     if rows:
         conn.executemany(
-            "INSERT OR REPLACE INTO compaction (sendero_id, uuid, ts, trigger, pre_tokens,"
+            "INSERT OR REPLACE INTO compaction (session_id, uuid, ts, trigger, pre_tokens,"
             " post_tokens, logical_parent_uuid, anchor_uuid, preserved_count)"
             " VALUES (?,?,?,?,?,?,?,?,?)",
             rows,
         )
 
 
-def forget(conn: sqlite3.Connection, sendero_ids: Iterable[str]) -> int:
-    """Drop senderos whose transcripts have gone, and everything hanging off them."""
-    ids = [(i,) for i in sendero_ids]
+def forget(conn: sqlite3.Connection, session_ids: Iterable[str]) -> int:
+    """Drop agent-sessions whose transcripts have gone, and everything hanging off them."""
+    ids = [(i,) for i in session_ids]
     if not ids:
         return 0
-    conn.executemany("DELETE FROM node WHERE sendero_id = ?", ids)
-    conn.executemany("DELETE FROM compaction WHERE sendero_id = ?", ids)
+    conn.executemany("DELETE FROM node WHERE session_id = ?", ids)
+    conn.executemany("DELETE FROM compaction WHERE session_id = ?", ids)
     conn.executemany(
-        "DELETE FROM sendero_edge WHERE child = ? OR parent = ?", [(i, i) for (i,) in ids]
+        "DELETE FROM session_edge WHERE child = ? OR parent = ?", [(i, i) for (i,) in ids]
     )
-    conn.executemany("DELETE FROM sendero WHERE id = ?", ids)
+    conn.executemany("DELETE FROM session WHERE id = ?", ids)
     return len(ids)
 
 

@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Protocol
 
-from senderos.models import Delta, Discovered, Running
+from agent_sessions.models import Delta, Discovered, Running
 
 
 class Source(Protocol):

@@ -10,9 +10,9 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from senderos import db, wormhole
-from senderos.sources import Source
-from senderos.sources.claude import ClaudeSource
+from agent_sessions import db, wormhole
+from agent_sessions.sources import Source
+from agent_sessions.sources.claude import ClaudeSource
 
 SOURCES: dict[str, Source] = {"claude": ClaudeSource()}
 
@@ -40,17 +40,17 @@ def sync(conn: sqlite3.Connection, agents: list[str] | None = None) -> SyncResul
             if delta is None:
                 skipped += 1
                 continue
-            if delta.sendero.id in seen:
+            if delta.session.id in seen:
                 # The same session written into two project dirs, which wormhole
-                # does when it converts a Cursor conversation. One sendero.
+                # does when it converts a Cursor conversation. One session.
                 duplicated += 1
                 continue
-            delta.sendero.project = attributor.project_for(delta.sendero.cwd)
-            db.write_sendero(conn, delta.sendero)
+            delta.session.project = attributor.project_for(delta.session.cwd)
+            db.write_session(conn, delta.session)
             db.write_nodes(conn, delta.nodes)
             db.write_edges(conn, delta.edges)
             db.write_compactions(conn, delta.compactions)
-            seen.add(delta.sendero.id)
+            seen.add(delta.session.id)
             nodes += len(delta.nodes)
 
     forgotten = db.forget(conn, _vanished(conn, seen, sources))
@@ -67,11 +67,11 @@ def sync(conn: sqlite3.Connection, agents: list[str] | None = None) -> SyncResul
 
 
 def _vanished(conn: sqlite3.Connection, seen: set[str], sources: list[Source]) -> list[str]:
-    """Indexed senderos this sync did not find: their transcripts are gone."""
+    """Indexed agent-sessions this sync did not find: their transcripts are gone."""
     agents = {s.name for s in sources}
     return [
         row["id"]
-        for row in conn.execute("SELECT id, agent FROM sendero")
+        for row in conn.execute("SELECT id, agent FROM session")
         if row["agent"] in agents and row["id"] not in seen
     ]
 

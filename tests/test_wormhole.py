@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from senderos.wormhole import Attributor, Worktree, WormholeUnavailable, worktrees
+from agent_sessions.wormhole import Attributor, Worktree, WormholeUnavailable, worktrees
 
 
 def attributor(*pairs: tuple[str, str]) -> Attributor:

@@ -62,26 +62,26 @@ def parse_count(text: str) -> int:
 def recent(conn: sqlite3.Connection, filters: Filters, sort: str, limit: int) -> list[dict]:
     where, values = filters.where()
     rows = conn.execute(
-        f"SELECT {COLUMNS} FROM sendero WHERE {where} ORDER BY {SORTS[sort]} LIMIT ?",
+        f"SELECT {COLUMNS} FROM session WHERE {where} ORDER BY {SORTS[sort]} LIMIT ?",
         [*values, limit],
     )
     return [dict(row) for row in rows]
 
 
 def search(conn: sqlite3.Connection, query: str, filters: Filters, limit: int) -> list[dict]:
-    """Senderos with a node matching `query`, best match first.
+    """Sessions with a node matching `query`, best match first.
 
     Ranking blends BM25 with recency: what I am looking for is nearly always
     something recent, and a five-month-old exact match is rarely the one. A
-    sendero is scored by its single best node, and shows that node as the snippet.
+    session is scored by its single best node, and shows that node as the snippet.
     """
     where, values = filters.where()
     rows = conn.execute(
         f"""
         WITH matched AS (
             -- bm25() may only be called where the fts table is queried directly,
-            -- so ranking and picking the best node per sendero are separate steps.
-            SELECT node.sendero_id AS sid, node.text AS text, bm25(node_fts) AS rank
+            -- so ranking and picking the best node per session are separate steps.
+            SELECT node.session_id AS sid, node.text AS text, bm25(node_fts) AS rank
             FROM node_fts
             JOIN node ON node.rowid = node_fts.rowid
             WHERE node_fts MATCH ?
@@ -93,7 +93,7 @@ def search(conn: sqlite3.Connection, query: str, filters: Filters, limit: int) -
         )
         SELECT {COLUMNS}, best.text AS snippet, best.rank AS rank
         FROM best
-        JOIN sendero ON sendero.id = best.sid
+        JOIN session ON session.id = best.sid
         WHERE best.n = 1 AND {where}
         ORDER BY best.rank * (1 + {_RECENCY}) ASC
         LIMIT ?
@@ -106,13 +106,13 @@ def search(conn: sqlite3.Connection, query: str, filters: Filters, limit: int) -
 # bm25 is negative and lower is better, so the boost multiplies: a recent hit
 # becomes more negative and sorts first. The boost decays over months, halving
 # at about 30 days old.
-_RECENCY = "3.0 / (1.0 + (strftime('%s', 'now') - COALESCE(sendero.ended_at, 0)) / 2592000.0)"
+_RECENCY = "3.0 / (1.0 + (strftime('%s', 'now') - COALESCE(session.ended_at, 0)) / 2592000.0)"
 
 
 def get(conn: sqlite3.Connection, id: str) -> dict | None:
-    """Resolve a sendero by full id, bare native id, or any unambiguous prefix."""
+    """Resolve a session by full id, bare native id, or any unambiguous prefix."""
     rows = conn.execute(
-        f"SELECT {COLUMNS}, native_id, leaf_uuid, path FROM sendero"
+        f"SELECT {COLUMNS}, native_id, leaf_uuid, path FROM session"
         " WHERE id = ? OR native_id = ? OR id LIKE ? OR native_id LIKE ?"
         " LIMIT 2",
         (id, id, f"{id}%", f"{id}%"),
@@ -122,7 +122,7 @@ def get(conn: sqlite3.Connection, id: str) -> dict | None:
     return dict(rows[0])
 
 
-def turns(conn: sqlite3.Connection, sendero_id: str) -> list[dict]:
+def turns(conn: sqlite3.Connection, session_id: str) -> list[dict]:
     """What I said, in order, with how large the context had grown by then.
 
     A user record carries no usage of its own — only the model's replies do —
@@ -133,14 +133,14 @@ def turns(conn: sqlite3.Connection, sendero_id: str) -> list[dict]:
         """
         SELECT uuid, role, ts, text, is_branch_point,
                (SELECT reply.context_tokens FROM node reply
-                 WHERE reply.sendero_id = node.sendero_id
+                 WHERE reply.session_id = node.session_id
                    AND reply.seq >= node.seq
                    AND reply.context_tokens > 0
                  ORDER BY reply.seq LIMIT 1) AS context_tokens
         FROM node
-        WHERE sendero_id = ? AND text != '' AND role IN ('user', 'summary')
+        WHERE session_id = ? AND text != '' AND role IN ('user', 'summary')
         ORDER BY seq
         """,
-        (sendero_id,),
+        (session_id,),
     )
     return [dict(row) for row in rows]

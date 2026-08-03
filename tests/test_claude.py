@@ -17,10 +17,10 @@ from conftest import (
     user,
 )
 
-from senderos.models import Delta, Running
-from senderos.sources.claude import ClaudeSource, parse
-from senderos.sources.claude import live as claude_live
-from senderos.sources.claude import render as claude_render
+from agent_sessions.models import Delta, Running
+from agent_sessions.sources.claude import ClaudeSource, parse
+from agent_sessions.sources.claude import live as claude_live
+from agent_sessions.sources.claude import render as claude_render
 
 SESSION = "7e90a7c6-ce43-4dfd-9d7c-8eb01ac7ccf2"
 
@@ -52,13 +52,13 @@ def linear() -> list[dict[str, Any]]:
 
 def test_linear_transcript(tmp_path: Path) -> None:
     delta = ingest(tmp_path, linear())
-    assert delta.sendero.id == f"claude:{SESSION}"
-    assert delta.sendero.agent == "claude"
-    assert delta.sendero.cwd == "/Users/dan/src/wormhole"
-    assert delta.sendero.git_branch == "main"
-    assert delta.sendero.model == "claude-opus-5"
-    assert delta.sendero.n_messages == 4
-    assert delta.sendero.n_user_turns == 2
+    assert delta.session.id == f"claude:{SESSION}"
+    assert delta.session.agent == "claude"
+    assert delta.session.cwd == "/Users/dan/src/wormhole"
+    assert delta.session.git_branch == "main"
+    assert delta.session.model == "claude-opus-5"
+    assert delta.session.n_messages == 4
+    assert delta.session.n_user_turns == 2
     assert [n.text for n in delta.nodes if n.text] == [
         "why is conform relocating worktrees",
         "Because it reconciles submodules.",
@@ -67,13 +67,13 @@ def test_linear_transcript(tmp_path: Path) -> None:
     ]
 
 
-def test_sidecar_only_transcript_is_not_a_sendero(tmp_path: Path) -> None:
+def test_sidecar_only_transcript_is_not_a_session(tmp_path: Path) -> None:
     records = [ai_title("Started and abandoned"), last_prompt("nothing")]
     assert parse(write(tmp_path, records), records) is None
 
 
 def test_timestamps_span_the_transcript(tmp_path: Path) -> None:
-    s = ingest(tmp_path, linear()).sendero
+    s = ingest(tmp_path, linear()).session
     assert s.started_at is not None and s.ended_at is not None
     assert s.started_at <= s.ended_at
 
@@ -133,7 +133,7 @@ def test_user_turn_count_ignores_tool_results(tmp_path: Path) -> None:
             last_prompt("a2"),
         ],
     )
-    assert delta.sendero.n_user_turns == 1
+    assert delta.session.n_user_turns == 1
 
 
 # --- branching -------------------------------------------------------------
@@ -166,23 +166,23 @@ def test_abandoned_branches_are_still_searchable(tmp_path: Path) -> None:
 
 def test_turn_count_includes_abandoned_branches(tmp_path: Path) -> None:
     """Everything I typed, I typed — even the attempt I then rewound."""
-    assert ingest(tmp_path, branched()).sendero.n_user_turns == 3
+    assert ingest(tmp_path, branched()).session.n_user_turns == 3
 
 
 def test_leaf_selects_which_branch_is_live(tmp_path: Path) -> None:
     records = branched()
     records[-1] = last_prompt("a2")
-    assert ingest(tmp_path, records).sendero.context_tokens == 1102
+    assert ingest(tmp_path, records).session.context_tokens == 1102
 
 
 def test_without_last_prompt_the_final_record_is_the_leaf(tmp_path: Path) -> None:
     """The live thread ends at a3, so its context is the one reported."""
-    assert ingest(tmp_path, branched()[:-1]).sendero.context_tokens == 1102
+    assert ingest(tmp_path, branched()[:-1]).session.context_tokens == 1102
 
 
 def test_leaf_naming_a_missing_record_is_ignored(tmp_path: Path) -> None:
     records = [*branched()[:-1], last_prompt("no-such-uuid")]
-    assert ingest(tmp_path, records).sendero.context_tokens == 1102
+    assert ingest(tmp_path, records).session.context_tokens == 1102
 
 
 # --- compaction ------------------------------------------------------------
@@ -211,7 +211,7 @@ def test_compaction_is_recorded(tmp_path: Path) -> None:
 
 
 def test_dropped_tokens_come_from_the_boundary(tmp_path: Path) -> None:
-    assert ingest(tmp_path, compacted()).sendero.dropped_tokens == 1_000_823 - 22_191
+    assert ingest(tmp_path, compacted()).session.dropped_tokens == 1_000_823 - 22_191
 
 
 def test_compact_summary_is_indexed_as_its_own_role(tmp_path: Path) -> None:
@@ -224,7 +224,7 @@ def test_pre_compaction_turns_survive_the_new_root(tmp_path: Path) -> None:
     """The boundary has parentUuid null, so the live walk cannot reach behind it."""
     delta = ingest(tmp_path, compacted())
     assert "a long piece of work" in [n.text for n in delta.nodes if n.text]
-    assert delta.sendero.n_user_turns == 2
+    assert delta.session.n_user_turns == 2
 
 
 def test_two_compactions_are_both_recorded(tmp_path: Path) -> None:
@@ -238,7 +238,7 @@ def test_two_compactions_are_both_recorded(tmp_path: Path) -> None:
     ]
     delta = ingest(tmp_path, records)
     assert [c.trigger for c in delta.compactions] == ["auto", "manual"]
-    assert delta.sendero.dropped_tokens == 1_000_823 - 22_191
+    assert delta.session.dropped_tokens == 1_000_823 - 22_191
 
 
 # --- tokens ----------------------------------------------------------------
@@ -277,7 +277,7 @@ def test_context_is_the_latest_value_not_a_sum(tmp_path: Path) -> None:
             last_prompt("a2"),
         ],
     )
-    assert delta.sendero.context_tokens == 2 + 999_154 + 628
+    assert delta.session.context_tokens == 2 + 999_154 + 628
 
 
 def test_output_tokens_dedupe_by_request_id(tmp_path: Path) -> None:
@@ -298,7 +298,7 @@ def test_output_tokens_dedupe_by_request_id(tmp_path: Path) -> None:
             last_prompt("a3"),
         ],
     )
-    assert delta.sendero.output_tokens == 1000
+    assert delta.session.output_tokens == 1000
 
 
 def test_output_tokens_sum_across_distinct_requests(tmp_path: Path) -> None:
@@ -317,7 +317,7 @@ def test_output_tokens_sum_across_distinct_requests(tmp_path: Path) -> None:
             last_prompt("a2"),
         ],
     )
-    assert delta.sendero.output_tokens == 20
+    assert delta.session.output_tokens == 20
 
 
 def test_context_ignores_the_abandoned_branch(tmp_path: Path) -> None:
@@ -334,7 +334,7 @@ def test_context_ignores_the_abandoned_branch(tmp_path: Path) -> None:
             "output_tokens": 1,
         },
     )
-    assert ingest(tmp_path, records).sendero.context_tokens == 1102
+    assert ingest(tmp_path, records).session.context_tokens == 1102
 
 
 # --- titles, cwd, forks ----------------------------------------------------
@@ -342,26 +342,26 @@ def test_context_ignores_the_abandoned_branch(tmp_path: Path) -> None:
 
 def test_custom_title_beats_ai_title(tmp_path: Path) -> None:
     records = [*linear(), ai_title("generated"), custom_title("mine")]
-    assert ingest(tmp_path, records).sendero.title == "mine"
+    assert ingest(tmp_path, records).session.title == "mine"
 
 
 def test_ai_title_beats_the_first_prompt(tmp_path: Path) -> None:
-    assert ingest(tmp_path, [*linear(), ai_title("generated")]).sendero.title == "generated"
+    assert ingest(tmp_path, [*linear(), ai_title("generated")]).session.title == "generated"
 
 
 def test_slug_is_used_when_there_is_no_title(tmp_path: Path) -> None:
     records = linear()
     records[3]["slug"] = "pure-treehouse"
-    assert ingest(tmp_path, records).sendero.title == "pure-treehouse"
+    assert ingest(tmp_path, records).session.title == "pure-treehouse"
 
 
 def test_first_prompt_is_the_last_resort_title(tmp_path: Path) -> None:
-    assert ingest(tmp_path, linear()).sendero.title == "why is conform relocating worktrees"
+    assert ingest(tmp_path, linear()).session.title == "why is conform relocating worktrees"
 
 
 def test_relocation_moves_the_cwd(tmp_path: Path) -> None:
     records = [*linear(), relocated("/Users/dan/src/tide")]
-    assert ingest(tmp_path, records).sendero.cwd == "/Users/dan/src/tide"
+    assert ingest(tmp_path, records).session.cwd == "/Users/dan/src/tide"
 
 
 def test_fork_edge_points_at_the_splice(tmp_path: Path) -> None:
@@ -384,7 +384,7 @@ def test_unforked_transcript_has_no_edges(tmp_path: Path) -> None:
 
 
 def test_discover_finds_sessions_but_not_subagents(tmp_path: Path) -> None:
-    """Nobody talked to a subagent, so its transcript is not a sendero."""
+    """Nobody talked to a subagent, so its transcript is not a session."""
     path = write(tmp_path, linear())
     subagents = path.parent / SESSION / "subagents"
     subagents.mkdir(parents=True)
@@ -426,7 +426,7 @@ def test_flagged_interrupt_is_not_my_turn(tmp_path: Path) -> None:
         "starting",
         "actually, do this instead",
     ]
-    assert delta.sendero.n_user_turns == 2
+    assert delta.session.n_user_turns == 2
 
 
 def test_unflagged_interrupt_is_recognised_by_its_text(tmp_path: Path) -> None:
@@ -440,7 +440,7 @@ def test_unflagged_interrupt_is_recognised_by_its_text(tmp_path: Path) -> None:
         ],
     )
     assert [n.text for n in delta.nodes if n.text] == ["do the thing"]
-    assert delta.sendero.n_user_turns == 1
+    assert delta.session.n_user_turns == 1
 
 
 def test_an_interruption_i_actually_quoted_is_kept(tmp_path: Path) -> None:
@@ -449,7 +449,7 @@ def test_an_interruption_i_actually_quoted_is_kept(tmp_path: Path) -> None:
         tmp_path,
         [user("u1", None, "why does [Request interrupted by user] keep appearing?")],
     )
-    assert delta.sendero.n_user_turns == 1
+    assert delta.session.n_user_turns == 1
 
 
 def test_a_second_root_does_not_lose_earlier_turns(tmp_path: Path) -> None:
@@ -464,7 +464,7 @@ def test_a_second_root_does_not_lose_earlier_turns(tmp_path: Path) -> None:
             last_prompt("a2"),
         ],
     )
-    assert delta.sendero.n_user_turns == 2
+    assert delta.session.n_user_turns == 2
     assert "first chain" in [n.text for n in delta.nodes if n.text]
 
 

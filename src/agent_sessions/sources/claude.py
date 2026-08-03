@@ -1,12 +1,12 @@
 """Claude Code transcripts.
 
-One `~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl` per sendero. The
+One `~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl` per session. The
 records form a DAG via parentUuid, not a list: rewinding an edited message
 branches it, and compaction starts a fresh root inside the same file. So the
 live thread is the walk back from the leaf, never the order the lines happen
 to be in.
 
-Subagent transcripts, under `<session-uuid>/subagents/`, are not senderos. The
+Subagent transcripts, under `<session-uuid>/subagents/`, are not sessions. The
 point of the index is work I took part in, and nobody talked to those.
 """
 
@@ -19,7 +19,7 @@ from typing import Any
 
 import orjson
 
-from senderos.models import Compaction, Delta, Discovered, Edge, Node, Running, Sendero
+from agent_sessions.models import Compaction, Delta, Discovered, Edge, Node, Running, Session
 
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
@@ -81,24 +81,24 @@ def parse(path: Path, records: list[dict[str, Any]]) -> Delta | None:
     if not nodes:
         return None
 
-    sendero = _sendero(path, records, nodes)
+    session = _session(path, records, nodes)
     branch_points = _branch_points(nodes)
-    active = _active_branch(nodes, sendero.leaf_uuid)
+    active = _active_branch(nodes, session.leaf_uuid)
 
-    dag = _nodes(sendero.id, nodes, branch_points)
-    compactions = _compactions(sendero.id, records)
-    _measure(sendero, nodes, active, dag, compactions)
+    dag = _nodes(session.id, nodes, branch_points)
+    compactions = _compactions(session.id, records)
+    _measure(session, nodes, active, dag, compactions)
 
     return Delta(
-        sendero=sendero, nodes=dag, edges=_edges(sendero.id, records), compactions=compactions
+        session=session, nodes=dag, edges=_edges(session.id, records), compactions=compactions
     )
 
 
-def _sendero(path: Path, records: list[dict[str, Any]], nodes: list[dict[str, Any]]) -> Sendero:
+def _session(path: Path, records: list[dict[str, Any]], nodes: list[dict[str, Any]]) -> Session:
     first, last = nodes[0], nodes[-1]
     native_id = first.get("sessionId") or path.stem
     state = _sidecar_state(records)
-    return Sendero(
+    return Session(
         id=f"claude:{native_id}",
         agent="claude",
         native_id=native_id,
@@ -156,7 +156,7 @@ def _active_branch(nodes: list[dict[str, Any]], leaf_uuid: str | None) -> list[d
     return chain
 
 
-def _nodes(sendero_id: str, nodes: list[dict[str, Any]], branch_points: set[str]) -> list[Node]:
+def _nodes(session_id: str, nodes: list[dict[str, Any]], branch_points: set[str]) -> list[Node]:
     """The whole DAG, prose or not, on every branch — abandoned ones included.
 
     A thread is frequently rewound at a tool call or a `turn_duration` record
@@ -165,7 +165,7 @@ def _nodes(sendero_id: str, nodes: list[dict[str, Any]], branch_points: set[str]
     """
     return [
         Node(
-            sendero_id=sendero_id,
+            session_id=session_id,
             uuid=node["uuid"],
             parent_uuid=node.get("parentUuid"),
             seq=seq,
@@ -203,7 +203,7 @@ def _text(node: dict[str, Any]) -> str:
     return "" if text in INTERRUPTIONS else text
 
 
-def _compactions(sendero_id: str, records: list[dict[str, Any]]) -> list[Compaction]:
+def _compactions(session_id: str, records: list[dict[str, Any]]) -> list[Compaction]:
     out = []
     for record in records:
         if record.get("subtype") != "compact_boundary":
@@ -212,7 +212,7 @@ def _compactions(sendero_id: str, records: list[dict[str, Any]]) -> list[Compact
         preserved = meta.get("preservedMessages", {})
         out.append(
             Compaction(
-                sendero_id=sendero_id,
+                session_id=session_id,
                 uuid=record["uuid"],
                 ts=_epoch(record.get("timestamp")),
                 trigger=meta.get("trigger", ""),
@@ -226,13 +226,13 @@ def _compactions(sendero_id: str, records: list[dict[str, Any]]) -> list[Compact
     return out
 
 
-def _edges(sendero_id: str, records: list[dict[str, Any]]) -> list[Edge]:
+def _edges(session_id: str, records: list[dict[str, Any]]) -> list[Edge]:
     """A fork reuses the parent's message uuid as its own root, so the splice is exact."""
     for record in records:
         if fork := record.get("forkedFrom"):
             return [
                 Edge(
-                    child=sendero_id,
+                    child=session_id,
                     parent=f"claude:{fork['sessionId']}",
                     kind="fork",
                     at_uuid=fork.get("messageUuid"),
@@ -242,7 +242,7 @@ def _edges(sendero_id: str, records: list[dict[str, Any]]) -> list[Edge]:
 
 
 def _measure(
-    sendero: Sendero,
+    session: Session,
     nodes: list[dict[str, Any]],
     active: list[dict[str, Any]],
     dag: list[Node],
@@ -259,18 +259,18 @@ def _measure(
     stamps = [t for n in nodes if (t := _epoch(n.get("timestamp")))]
     assistants = [n for n in active if n.get("type") == "assistant"]
 
-    sendero.n_messages = len(messages)
-    sendero.n_user_turns = sum(1 for n in dag if n.role == "user" and n.text)
-    sendero.started_at = min(stamps, default=None)
-    sendero.ended_at = max(stamps, default=None)
-    sendero.model = next(
+    session.n_messages = len(messages)
+    session.n_user_turns = sum(1 for n in dag if n.role == "user" and n.text)
+    session.started_at = min(stamps, default=None)
+    session.ended_at = max(stamps, default=None)
+    session.model = next(
         (m for n in reversed(assistants) if (m := n.get("message", {}).get("model"))), None
     )
-    sendero.context_tokens = next((c for n in reversed(assistants) if (c := _context_tokens(n))), 0)
-    sendero.output_tokens = _output_tokens(assistants)
-    sendero.dropped_tokens = max((c.pre_tokens - c.post_tokens for c in compactions), default=0)
-    if not sendero.title:
-        sendero.title = _title_from(dag)
+    session.context_tokens = next((c for n in reversed(assistants) if (c := _context_tokens(n))), 0)
+    session.output_tokens = _output_tokens(assistants)
+    session.dropped_tokens = max((c.pre_tokens - c.post_tokens for c in compactions), default=0)
+    if not session.title:
+        session.title = _title_from(dag)
 
 
 def _output_tokens(assistants: list[dict[str, Any]]) -> int:

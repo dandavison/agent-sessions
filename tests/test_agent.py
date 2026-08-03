@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from senderos import agents, cli, skill
+from agent_sessions import agents, cli, skill
 
 
 @pytest.fixture
 def started(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     """Catch the handover, so the test process survives it."""
     calls: list[list[str]] = []
-    monkeypatch.setattr(skill, "SKILLS_DIR", tmp_path / "senderos")
+    monkeypatch.setattr(skill, "SKILLS_DIR", tmp_path / "agent-sessions")
     monkeypatch.setattr(agents.shutil, "which", lambda program: f"/usr/local/bin/{program}")
     monkeypatch.setattr(os, "execvp", lambda file, args: calls.append(list(args)))
     return calls
@@ -37,13 +37,13 @@ def test_pi_on_the_default_model_is_what_you_get(started, run, tmp_path: Path) -
             "--model",
             agents.DEFAULT_MODELS["pi"],
             "--append-system-prompt",
-            str(tmp_path / "senderos" / "SKILL.md"),
+            str(tmp_path / "agent-sessions" / "SKILL.md"),
         ]
     ]
 
 
 def test_qwen_can_be_asked_for(started, run) -> None:
-    """Its own settings name a model already, so senderos does not name one."""
+    """Its own settings name a model already, so agent-sessions does not name one."""
     run("agent", "--with", "qwen")
     assert started[0][0] == "qwen"
     assert started[0][1].startswith("--append-system-prompt=")
@@ -66,7 +66,7 @@ def test_a_prompt_goes_where_each_agent_expects_it(started, run) -> None:
 
 def test_the_skill_is_written_before_the_handover(started, run, tmp_path: Path) -> None:
     run("agent")
-    assert (tmp_path / "senderos" / "SKILL.md").read_text() == skill.generate()
+    assert (tmp_path / "agent-sessions" / "SKILL.md").read_text() == skill.generate()
 
 
 def test_the_skill_is_in_context_from_turn_one(started, run) -> None:
@@ -82,7 +82,7 @@ def test_the_skill_is_in_context_from_turn_one(started, run) -> None:
 
 
 def test_an_agent_that_is_not_installed_is_said_so(tmp_path, monkeypatch, run) -> None:
-    monkeypatch.setattr(skill, "SKILLS_DIR", tmp_path / "senderos")
+    monkeypatch.setattr(skill, "SKILLS_DIR", tmp_path / "agent-sessions")
     monkeypatch.setattr(agents.shutil, "which", lambda program: None)
     code, _, err = run("agent", "--with", "qwen")
     assert code == cli.EXIT_USAGE

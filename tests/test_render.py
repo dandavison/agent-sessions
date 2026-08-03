@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from senderos.render import AGENT_ENV_VARS, MIN_WIDTH, Format, Renderer, _fit, detect
+from agent_sessions.render import AGENT_ENV_VARS, MIN_WIDTH, Format, Renderer, _fit, detect
 
 Rows = list[dict[str, object]]
 
@@ -46,10 +46,10 @@ def test_quiet_format_is_ids_only(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_hints_go_to_stderr(capsys: pytest.CaptureFixture[str]) -> None:
-    Renderer(Format.AGENT).hint("run `senderos sync`")
+    Renderer(Format.AGENT).hint("run `agent-sessions sync`")
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "run `senderos sync`" in captured.err
+    assert "run `agent-sessions sync`" in captured.err
 
 
 def test_quiet_suppresses_hints(capsys: pytest.CaptureFixture[str]) -> None:

@@ -1,56 +1,56 @@
 from pathlib import Path
 
-from senderos import db
-from senderos.models import Compaction, Edge, Node, Sendero
+from agent_sessions import db
+from agent_sessions.models import Compaction, Edge, Node, Session
 
 
-def make_sendero(id: str = "claude:a", path: str = "/t/a.jsonl", **kw) -> Sendero:
-    return Sendero(id=id, agent="claude", native_id=id.split(":")[1], path=path, **kw)
+def make_session(id: str = "claude:a", path: str = "/t/a.jsonl", **kw) -> Session:
+    return Session(id=id, agent="claude", native_id=id.split(":")[1], path=path, **kw)
 
 
 def test_connect_creates_schema(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "index.db")
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-    assert {"sendero", "node", "sendero_edge", "compaction", "node_fts"} <= tables
+    assert {"session", "node", "session_edge", "compaction", "node_fts"} <= tables
     assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
 
 
 def test_schema_version_bump_rebuilds(tmp_path: Path) -> None:
     path = tmp_path / "index.db"
     conn = db.connect(path)
-    db.write_sendero(conn, make_sendero())
+    db.write_session(conn, make_session())
     conn.commit()
     conn.execute("PRAGMA user_version = 0")
     conn.commit()
     conn.close()
 
     conn = db.connect(path)
-    assert conn.execute("SELECT count(*) FROM sendero").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM session").fetchone()[0] == 0
 
 
-def test_write_sendero_is_idempotent(tmp_path: Path) -> None:
+def test_write_session_is_idempotent(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "index.db")
-    db.write_sendero(conn, make_sendero(title="first"))
-    db.write_sendero(conn, make_sendero(title="second"))
-    rows = conn.execute("SELECT title FROM sendero").fetchall()
+    db.write_session(conn, make_session(title="first"))
+    db.write_session(conn, make_session(title="second"))
+    rows = conn.execute("SELECT title FROM session").fetchall()
     assert [r["title"] for r in rows] == ["second"]
 
 
-def test_write_sendero_round_trips_bools(tmp_path: Path) -> None:
+def test_write_session_round_trips_bools(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "index.db")
-    db.write_sendero(conn, make_sendero(is_sidechain=True))
-    assert conn.execute("SELECT is_sidechain FROM sendero").fetchone()[0] == 1
+    db.write_session(conn, make_session(is_sidechain=True))
+    assert conn.execute("SELECT is_sidechain FROM session").fetchone()[0] == 1
 
 
 def test_forget_cascades(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "index.db")
-    db.write_sendero(conn, make_sendero())
-    db.write_sendero(conn, make_sendero(id="claude:b", path="/t/b.jsonl"))
+    db.write_session(conn, make_session())
+    db.write_session(conn, make_session(id="claude:b", path="/t/b.jsonl"))
     db.write_nodes(
         conn,
         [
             Node(
-                sendero_id="claude:a",
+                session_id="claude:a",
                 uuid="u1",
                 parent_uuid=None,
                 seq=0,
@@ -65,7 +65,7 @@ def test_forget_cascades(tmp_path: Path) -> None:
         conn,
         [
             Compaction(
-                sendero_id="claude:a",
+                session_id="claude:a",
                 uuid="c1",
                 ts=2,
                 trigger="auto",
@@ -81,18 +81,18 @@ def test_forget_cascades(tmp_path: Path) -> None:
     assert db.forget(conn, ["claude:a"]) == 1
     assert conn.execute("SELECT count(*) FROM node").fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM compaction").fetchone()[0] == 0
-    assert conn.execute("SELECT count(*) FROM sendero_edge").fetchone()[0] == 0
-    assert conn.execute("SELECT count(*) FROM sendero").fetchone()[0] == 1
+    assert conn.execute("SELECT count(*) FROM session_edge").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM session").fetchone()[0] == 1
 
 
 def test_fts_finds_node_text(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "index.db")
-    db.write_sendero(conn, make_sendero())
+    db.write_session(conn, make_session())
     db.write_nodes(
         conn,
         [
             Node(
-                sendero_id="claude:a",
+                session_id="claude:a",
                 uuid="u1",
                 parent_uuid=None,
                 seq=0,
@@ -101,7 +101,7 @@ def test_fts_finds_node_text(tmp_path: Path) -> None:
                 text="why is conform relocating worktrees",
             ),
             Node(
-                sendero_id="claude:a",
+                session_id="claude:a",
                 uuid="u2",
                 parent_uuid="u1",
                 seq=1,
@@ -122,12 +122,12 @@ def test_fts_finds_node_text(tmp_path: Path) -> None:
 
 def test_fts_stems(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "index.db")
-    db.write_sendero(conn, make_sendero())
+    db.write_session(conn, make_session())
     db.write_nodes(
         conn,
         [
             Node(
-                sendero_id="claude:a",
+                session_id="claude:a",
                 uuid="u1",
                 parent_uuid=None,
                 seq=0,
@@ -147,7 +147,7 @@ def test_fts_stems(tmp_path: Path) -> None:
 def test_silent_nodes_never_match_search(tmp_path: Path) -> None:
     """Tool calls are stored to keep the DAG whole, but carry no text to find."""
     conn = db.connect(tmp_path / "index.db")
-    db.write_sendero(conn, make_sendero())
+    db.write_session(conn, make_session())
     db.write_nodes(
         conn,
         [
@@ -170,6 +170,6 @@ def test_synced_at_starts_unset_and_round_trips(tmp_path: Path) -> None:
 
 def test_indexed_paths_lists_every_transcript(tmp_path: Path) -> None:
     conn = db.connect(tmp_path / "index.db")
-    db.write_sendero(conn, make_sendero())
-    db.write_sendero(conn, make_sendero(id="claude:b", path="/t/b.jsonl"))
+    db.write_session(conn, make_session())
+    db.write_session(conn, make_session(id="claude:b", path="/t/b.jsonl"))
     assert db.indexed_paths(conn) == {"/t/a.jsonl", "/t/b.jsonl"}

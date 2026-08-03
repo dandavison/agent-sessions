@@ -9,10 +9,12 @@ from textwrap import dedent
 
 import click
 
-SKILLS_DIR = Path.home() / ".agents" / "skills" / "senderos"
+COMMAND = "agent-sessions"
+
+SKILLS_DIR = Path.home() / ".agents" / "skills" / COMMAND
 
 FRONTMATTER = """---
-name: senderos
+name: agent-sessions
 description: >-
   Find and resume past work done with coding agents. Use when the user refers to
   something they did before — "the conversation where we…", "what did I decide
@@ -22,10 +24,10 @@ description: >-
 """
 
 PREAMBLE = """
-# senderos
+# agent-sessions
 
-A *sendero* is one unit of work done with a coding agent: durable, branching,
-resumable. `senderos` indexes them and finds them again.
+Finds past sessions with coding agents — Claude Code and others — and resumes
+them.
 
 Output adapts to the caller: you will get TSV with nothing truncated, and full
 ids and timestamps. Add `--json` for a structured payload, `-q` for bare ids to
@@ -35,12 +37,12 @@ Exit codes: 0 found something, 1 found nothing, 2 you called it wrong.
 
 ## Typical use
 
-    senderos search "worktree relocation" -p wormhole   # find it
-    senderos show <id> --turns                          # read what was said
-    senderos resume <id>                                # pick it back up
+    agent-sessions search "worktree relocation" -p wormhole   # find it
+    agent-sessions show <id> --turns                          # read what was said
+    agent-sessions resume <id>                                # pick it back up
 
 Ids round-trip: whatever `search` prints is accepted by every other command,
-and any unambiguous prefix will do — `senderos show 7daeb` is enough.
+and any unambiguous prefix will do — `agent-sessions show 7daeb` is enough.
 
 ## Worth knowing
 
@@ -48,9 +50,9 @@ and any unambiguous prefix will do — `senderos show 7daeb` is enough.
   rather than spending a call on `--help`.
 - Matching is case-insensitive and stemmed: `relocate` finds "relocating".
 - Tool calls and their output are not indexed, so `search` matches what was
-  said, not what was run. Use `senderos cat <id> --tools` to see commands.
-- Context size is the peak the sendero reached, not a sum of its turns.
-- The index is a cache over transcript files, refreshed by `senderos sync`.
+  said, not what was run. Use `agent-sessions cat <id> --tools` to see commands.
+- Context size is the peak the session reached, not a sum of its turns.
+- The index is a cache over transcript files, refreshed by `agent-sessions sync`.
   Do not sync unprompted: it is the user's call, and results are usually fine
   without it.
 
@@ -60,12 +62,12 @@ and any unambiguous prefix will do — `senderos show 7daeb` is enough.
 
 def generate(command: click.Group | None = None) -> str:
     """One line per command, plus the flags that are not self-evident."""
-    from senderos.cli import main
+    from agent_sessions.cli import main
 
     command = command if command is not None else main
     lines = [FRONTMATTER.strip(), PREAMBLE.rstrip(), ""]
     for name, sub in sorted(command.commands.items()):
-        lines.append(f"### `{' '.join(['senderos', name, *_arguments(sub)])}`")
+        lines.append(f"### `{' '.join([COMMAND, name, *_arguments(sub)])}`")
         lines.append("")
         lines.append(_summary(sub))
         if options := _options(sub):

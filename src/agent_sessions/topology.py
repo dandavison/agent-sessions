@@ -1,4 +1,4 @@
-"""The shape of a sendero: where it branched, where it was compacted, what forked off it.
+"""The shape of a session: where it branched, where it was compacted, what forked off it.
 
 A transcript is a DAG, and most of it is uninteresting: long single-child runs
 where nothing happened but the work. Those collapse into one segment each, so
@@ -33,36 +33,36 @@ class Topology:
     forked_from: dict | None
 
 
-def of(conn: sqlite3.Connection, sendero: dict) -> Topology:
+def of(conn: sqlite3.Connection, session: dict) -> Topology:
     nodes = [
         dict(row)
         for row in conn.execute(
             "SELECT uuid, parent_uuid, seq, role, text, ts, context_tokens, is_branch_point"
-            " FROM node WHERE sendero_id = ? ORDER BY seq",
-            (sendero["id"],),
+            " FROM node WHERE session_id = ? ORDER BY seq",
+            (session["id"],),
         )
     ]
     compactions = {
         row["uuid"]: dict(row)
-        for row in conn.execute("SELECT * FROM compaction WHERE sendero_id = ?", (sendero["id"],))
+        for row in conn.execute("SELECT * FROM compaction WHERE session_id = ?", (session["id"],))
     }
     roots = _segments(nodes, compactions)
-    _mark_active(roots, _ancestry(nodes, sendero.get("leaf_uuid")))
+    _mark_active(roots, _ancestry(nodes, session.get("leaf_uuid")))
     return Topology(
         roots=roots,
         forks=[
             dict(r)
             for r in conn.execute(
-                "SELECT child, at_uuid FROM sendero_edge WHERE parent = ? AND kind = 'fork'",
-                (sendero["id"],),
+                "SELECT child, at_uuid FROM session_edge WHERE parent = ? AND kind = 'fork'",
+                (session["id"],),
             )
         ],
         forked_from=next(
             (
                 dict(r)
                 for r in conn.execute(
-                    "SELECT parent, at_uuid FROM sendero_edge WHERE child = ? AND kind = 'fork'",
-                    (sendero["id"],),
+                    "SELECT parent, at_uuid FROM session_edge WHERE child = ? AND kind = 'fork'",
+                    (session["id"],),
                 )
             ),
             None,
