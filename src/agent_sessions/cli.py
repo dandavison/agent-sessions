@@ -3,14 +3,17 @@
 import sqlite3
 import sys
 import time
+import webbrowser
+from contextlib import suppress
 from dataclasses import asdict
 from pathlib import Path
 
 import click
 
-from agent_sessions import agents, db, index, query, render, skill, topology, wormhole
+from agent_sessions import agents, db, display, index, query, render, skill, topology, web
 from agent_sessions.agents import NotInstalled
 from agent_sessions.render import Format, Renderer
+from agent_sessions.resume import resume as resume_session
 from agent_sessions.wormhole import WormholeUnavailable
 
 EXIT_NO_RESULTS = 1
@@ -185,7 +188,10 @@ def search(query_text, project, agent, since, min_context, limit, fmt, as_json, 
         hits = query.search(conn, query_text, filters(project, agent, since, min_context), limit)
     except sqlite3.OperationalError as e:
         raise click.UsageError(f"bad query {query_text!r}: {e}") from e
-    _report(out, [_row(h) | {"snippet": _snippet(h["snippet"], query_text)} for h in hits])
+    _report(
+        out,
+        [display.row(h) | {"snippet": display.snippet(h["snippet"], query_text)} for h in hits],
+    )
     if hits:
         _next(out, hits[0]["id"], "show {id} --turns", "cat --tools", "tree", "resume")
 
@@ -205,7 +211,7 @@ def list_sessions(project, agent, since, min_context, limit, sort, fmt, as_json,
     out = renderer(fmt, as_json, quiet)
     conn = db.connect()
     found = query.recent(conn, filters(project, agent, since, min_context), sort, limit)
-    _report(out, [_row(f) for f in found])
+    _report(out, [display.row(f) for f in found])
     if found:
         _next(out, found[0]["id"], "show {id} --turns", "cat --tools", "tree", "resume")
 
@@ -229,9 +235,9 @@ def show(id: str, turns_only: bool, fmt: str | None, as_json: bool, quiet: bool)
         out.record(dict(session) | {"turns": said})
         return
     if not turns_only:
-        out.record(_details(session))
+        out.record(display.details(session))
         out.line("")
-    out.table([_turn(t) for t in said], quiet_key="uuid")
+    out.table([display.turn(t) for t in said], quiet_key="uuid")
     _next(out, session["id"], "cat {id} --tools", "tree", "resume", "resume --fork")
 
 
@@ -264,30 +270,10 @@ def tree(id: str, fmt: str | None, as_json: bool, quiet: bool) -> None:
 
 
 def _draw(out: Renderer, segment: topology.Segment, prefix: str, last: bool) -> None:
-    out.line(prefix + ("└─ " if last else "├─ ") + _describe(segment))
+    out.line(prefix + ("└─ " if last else "├─ ") + display.describe(segment))
     below = prefix + ("   " if last else "│  ")
     for i, child in enumerate(segment.children):
         _draw(out, child, below, i == len(segment.children) - 1)
-
-
-def _describe(segment: topology.Segment) -> str:
-    if c := segment.compaction:
-        dropped = (c["pre_tokens"] or 0) - (c["post_tokens"] or 0)
-        return (
-            f"compacted ({c['trigger']}) {_tokens(c['pre_tokens'])} → {_tokens(c['post_tokens'])},"
-            f" dropped {_tokens(dropped)}, {c['preserved_count']} kept"
-        )
-    parts = [
-        _date(segment.started_at, with_time=True),
-        _plural(segment.turns, "turn") if segment.turns else _plural(segment.messages, "message"),
-        _tokens(segment.context_tokens),
-        "(abandoned)" if segment.abandoned else "",
-    ]
-    return "  ".join(p for p in parts if p)
-
-
-def _plural(n: int, noun: str) -> str:
-    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
 
 
 def _short(uuid: str | None) -> str:
@@ -327,32 +313,31 @@ def resume(id: str, fork: bool, fmt: str | None, as_json: bool, quiet: bool) -> 
     """
     out = renderer(fmt, as_json, quiet)
     conn = db.connect()
-    session = _resolve(conn, id)
-    if not session["project"]:
-        raise click.UsageError(
-            f"{session['id']} has no project: its cwd was {session['cwd']}."
-            " There is nowhere to resume it."
+    resumed = resume_session(_resolve(conn, id), fork=fork)
+    out.record(asdict(resumed))
+    if resumed.was_running and not fork:
+        out.hint(
+            f"Already running ({resumed.was_running}); focused its pane rather than starting again."
         )
 
-    running = index.SOURCES[session["agent"]].live().get(session["native_id"])
-    wormhole.resume(
-        session["project"],
-        session["native_id"],
-        fork=fork,
-        pid=running.pid if running else None,
-    )
-    out.record(
-        {
-            "id": session["id"],
-            "project": session["project"],
-            "forked": fork,
-            "was_running": running.status if running else "",
-        }
-    )
-    if running and not fork:
-        out.hint(
-            f"Already running ({running.status}); focused its pane rather than starting again."
-        )
+
+@main.command()
+@click.option("--port", default=web.PORT, show_default=True, help="Which port to listen on.")
+@click.option("--host", default=web.HOST, show_default=True, help="Which address to bind.")
+@click.option("--open/--no-open", "open_browser", default=True, help="Open a browser at it.")
+def serve(port: int, host: str, open_browser: bool) -> None:
+    """Serve the index in a browser, where a link is enough to resume.
+
+    `/resume/<id>` resumes on a GET, so that URL is clickable from anywhere a URL
+    can be clicked — a note, a chat message, an agent's output — not only from
+    this UI. Runs until interrupted.
+    """
+    url = f"http://{host}:{port}/"
+    print(f"agent-sessions at {url}", file=sys.stderr)
+    if open_browser:
+        webbrowser.open(url)
+    with suppress(KeyboardInterrupt):
+        web.serve(host, port)
 
 
 @main.command(
@@ -430,67 +415,6 @@ def _next(out: Renderer, id: str, ready: str, *others: str) -> None:
     enough to act on.
     """
     out.hint(f"Next: agent-sessions {ready.format(id=id)}   (also: {', '.join(others)})")
-
-
-def _row(s: dict) -> dict:
-    return {
-        "id": s["id"],
-        "project": s["project"],
-        "when": _date(s["ended_at"]),
-        "turns": s["n_user_turns"],
-        "context": _tokens(s["context_tokens"]),
-        "title": s["title"],
-    }
-
-
-def _details(s: dict) -> dict:
-    return {
-        "id": s["id"],
-        "title": s["title"],
-        "project": s["project"],
-        "branch": s["git_branch"],
-        "cwd": s["cwd"],
-        "model": s["model"],
-        "started": _date(s["started_at"]),
-        "ended": _date(s["ended_at"]),
-        "turns": s["n_user_turns"],
-        "messages": s["n_messages"],
-        "context": _tokens(s["context_tokens"]),
-        "output": _tokens(s["output_tokens"]),
-        "dropped": _tokens(s["dropped_tokens"]),
-    }
-
-
-def _turn(t: dict) -> dict:
-    return {
-        "when": _date(t["ts"], with_time=True),
-        "role": t["role"],
-        "context": _tokens(t["context_tokens"]),
-        "text": t["text"],
-    }
-
-
-def _snippet(text: str, query_text: str) -> str:
-    """The matching node, trimmed to the neighbourhood of the first matching word."""
-    flat = " ".join(text.split())
-    words = [w.strip('"*').lower() for w in query_text.split() if w.isalnum()]
-    lowered = flat.lower()
-    at = next((i for w in words if (i := lowered.find(w)) >= 0), 0)
-    start = max(0, at - 40)
-    return ("…" if start else "") + flat[start : start + 200]
-
-
-def _date(when: int | None, with_time: bool = False) -> str:
-    if not when:
-        return ""
-    shape = "%Y-%m-%d %H:%M" if with_time else "%Y-%m-%d"
-    return time.strftime(shape, time.localtime(when))
-
-
-def _tokens(n: int | None) -> str:
-    if not n:
-        return ""
-    return f"{n / 1_000_000:.1f}m" if n >= 1_000_000 else f"{n // 1000}k" if n >= 1000 else str(n)
 
 
 def _ago(when: int | None) -> str:

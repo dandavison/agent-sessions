@@ -13,11 +13,17 @@ Design: https://github.com/dandavison/log/issues/289
     agent-sessions tree claude:7e90a7c6              # branch, compaction and fork topology
     agent-sessions cat claude:7e90a7c6 --tools       # the whole thing, tool calls included
     agent-sessions resume claude:7e90a7c6            # pick it back up
+    agent-sessions serve                             # the same, in a browser
     agent-sessions skills add                        # teach an agent the command surface
 
 Output adapts to who is asking: an aligned table for a terminal, TSV with
 nothing truncated for a coding agent, `--json` for anything else. Hints and
 errors go to stderr, so only data reaches stdout.
+
+`serve` puts the index in a browser, where resuming is a GET:
+`http://localhost:7118/resume/claude:7e90a7c6` picks the session back up, and
+`?fork=1` branches it instead. So a link is enough — from the page, a note, a
+chat message, or an agent's output.
 
 ## Develop
 
