@@ -8,7 +8,8 @@ from pathlib import Path
 
 import click
 
-from senderos import db, index, query, render, skill, topology, wormhole
+from senderos import agents, db, index, query, render, skill, topology, wormhole
+from senderos.agents import NotInstalled
 from senderos.render import Format, Renderer
 from senderos.wormhole import WormholeUnavailable
 
@@ -353,6 +354,34 @@ def resume(id: str, fork: bool, fmt: str | None, as_json: bool, quiet: bool) -> 
         )
 
 
+@main.command(
+    epilog="""\b
+Examples
+  $ senderos agent                                    # pi, knowing this tool
+  $ senderos agent --with qwen
+  $ senderos agent --model anthropic/claude-opus-5
+  $ senderos agent "pick up the compaction work"      # with a first message
+"""
+)
+@click.option(
+    "--with",
+    "program",
+    type=click.Choice(sorted(agents.DEFAULT_MODELS)),
+    default="pi",
+    show_default=True,
+    help="Which coding agent to start.",
+)
+@click.option("--model", help="Which model it should run, named as that agent names it.")
+@click.argument("prompt", required=False)
+def agent(program: str, model: str | None, prompt: str | None) -> None:
+    """Start a coding agent with the senderos skill loaded.
+
+    The skill is written out first, so the agent can find past work from its
+    first call. This process is replaced by the agent, in the current directory.
+    """
+    agents.start(program, model or "", prompt or "")
+
+
 @main.group(name="skills")
 def skills_group() -> None:
     """Manage the senderos skill, so an agent knows this tool from turn one."""
@@ -481,7 +510,7 @@ def run(argv: list[str] | None = None) -> int:
         return EXIT_USAGE
     except click.exceptions.Abort:
         return EXIT_USAGE
-    except WormholeUnavailable as e:
+    except (NotInstalled, WormholeUnavailable) as e:
         print(f"Error: {e}", file=sys.stderr)
         return EXIT_USAGE
     return 0
