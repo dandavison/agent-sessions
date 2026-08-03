@@ -361,7 +361,7 @@ Examples
   $ agent-sessions agent                                    # pi, knowing this tool
   $ agent-sessions agent --with qwen
   $ agent-sessions agent --model anthropic/claude-opus-5
-  $ agent-sessions agent "pick up the compaction work"      # with a first message
+  $ agent-sessions agent "pick up the compaction work"      # your own first task
 """
 )
 @click.option(
@@ -375,10 +375,14 @@ Examples
 @click.option("--model", help="Which model it should run, named as that agent names it.")
 @click.argument("prompt", required=False)
 def agent(program: str, model: str | None, prompt: str | None) -> None:
-    """Start a coding agent with the agent-sessions skill loaded.
+    """Start a coding agent that already knows this tool.
 
-    The skill is written out first, so the agent can find past work from its
-    first call. This process is replaced by the agent, in the current directory.
+    The whole skill goes in the opening message, so it is in context from the
+    first turn rather than merely discoverable. Neither agent can pre-fill its
+    input without submitting it, so the message carries a task too: PROMPT if
+    given, otherwise a look at your recent sessions.
+
+    This process is replaced by the agent, in the current directory.
     """
     agents.start(program, model or "", prompt or "")
 

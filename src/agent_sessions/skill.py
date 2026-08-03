@@ -80,6 +80,15 @@ def generate(command: click.Group | None = None) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def body() -> str:
+    """The skill without its frontmatter.
+
+    The frontmatter tells a skill loader when to reach for this; a model reading
+    the skill directly has already reached for it, and the YAML is only noise.
+    """
+    return generate().split("---\n", 2)[-1].lstrip("\n")
+
+
 def _examples(command: click.Command) -> list[str]:
     """Worked examples, which an agent matches against faster than it reads prose.
 
