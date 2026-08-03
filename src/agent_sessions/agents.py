@@ -1,13 +1,11 @@
 """Starting a coding agent that already knows this tool.
 
-Discovery alone would put only the skill's description in context, and only
-until something reminded the agent to read the rest. Appending it to the system
-prompt puts the whole thing there from turn one.
+Both agents discover skills in ~/.agents/skills, so knowing senderos is a
+matter of writing the skill out and then handing the terminal over.
 """
 
 import os
 import shutil
-from pathlib import Path
 
 from agent_sessions import skill
 
@@ -28,23 +26,18 @@ def start(program: str, model: str = "", prompt: str = "") -> None:
     """Replace this process with the agent, in the current directory."""
     if not shutil.which(program):
         raise NotInstalled(program)
-    os.execvp(program, _command(program, model, prompt, skill.install(skill.SKILLS_DIR)))
+    skill.install(skill.SKILLS_DIR)
+    os.execvp(program, _command(program, model, prompt))
 
 
-def _command(program: str, model: str, prompt: str, skill_path: Path) -> list[str]:
-    """Where each agent differs: pi takes the skill as a file, qwen as text.
+def _command(program: str, model: str, prompt: str) -> list[str]:
+    """pi reads trailing words as the first message; for qwen that is -i.
 
-    A prompt is pi's trailing words, and for qwen -i — not -p, which answers
-    and exits rather than opening a session.
+    Not qwen's -p, which answers and exits rather than opening a session.
     """
     command = [program]
     if model := model or DEFAULT_MODELS[program]:
         command += ["--model", model]
-    if program == "pi":
-        command += ["--append-system-prompt", str(skill_path)]
-    else:
-        # One argument: given two, qwen reads the skill's leading --- as flags.
-        command += [f"--append-system-prompt={skill_path.read_text()}"]
     if prompt:
         command += [prompt] if program == "pi" else ["--prompt-interactive", prompt]
     return command
