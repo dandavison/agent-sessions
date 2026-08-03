@@ -96,7 +96,7 @@ def sync(agents: tuple[str, ...], fmt: str | None, as_json: bool, quiet: bool) -
             "forgotten": result.forgotten,
         }
     )
-    out.hint("Use `senderos search <query>` to find one.")
+    out.hint('Next: senderos search "<words>" | senderos ls -p <project> --since 2w')
 
 
 @main.command()
@@ -119,8 +119,6 @@ def status(fmt: str | None, as_json: bool, quiet: bool) -> None:
             "changed_since": changed,
         }
     )
-    if changed:
-        out.hint(f"{changed} transcripts have changed. Run `senderos sync`.")
 
 
 def filter_options(f):
@@ -185,9 +183,9 @@ def search(query_text, project, agent, since, min_context, limit, fmt, as_json, 
         hits = query.search(conn, query_text, filters(project, agent, since, min_context), limit)
     except sqlite3.OperationalError as e:
         raise click.UsageError(f"bad query {query_text!r}: {e}") from e
-    _report(out, conn, [_row(h) | {"snippet": _snippet(h["snippet"], query_text)} for h in hits])
+    _report(out, [_row(h) | {"snippet": _snippet(h["snippet"], query_text)} for h in hits])
     if hits:
-        out.hint(f"`senderos show {hits[0]['id']}` for the whole of the top hit.")
+        _next(out, hits[0]["id"], "show {id} --turns", "cat --tools", "tree", "resume")
 
 
 @main.command(name="ls")
@@ -205,7 +203,9 @@ def list_senderos(project, agent, since, min_context, limit, sort, fmt, as_json,
     out = renderer(fmt, as_json, quiet)
     conn = db.connect()
     found = query.recent(conn, filters(project, agent, since, min_context), sort, limit)
-    _report(out, conn, [_row(f) for f in found])
+    _report(out, [_row(f) for f in found])
+    if found:
+        _next(out, found[0]["id"], "show {id} --turns", "cat --tools", "tree", "resume")
 
 
 @main.command()
@@ -230,7 +230,7 @@ def show(id: str, turns_only: bool, fmt: str | None, as_json: bool, quiet: bool)
         out.record(_details(sendero))
         out.line("")
     out.table([_turn(t) for t in said], quiet_key="uuid")
-    out.hint(f"`senderos resume {sendero['id']}` to pick it up.")
+    _next(out, sendero["id"], "cat {id} --tools", "tree", "resume", "resume --fork")
 
 
 @main.command()
@@ -258,6 +258,7 @@ def tree(id: str, fmt: str | None, as_json: bool, quiet: bool) -> None:
         _draw(out, root, prefix="", last=i == len(shape.roots) - 1)
     for fork in shape.forks:
         out.line(f"  fork → {fork['child']} at {_short(fork['at_uuid'])}")
+    _next(out, sendero["id"], "show {id} --turns", "cat --tools", "resume")
 
 
 def _draw(out: Renderer, segment: topology.Segment, prefix: str, last: bool) -> None:
@@ -347,7 +348,9 @@ def resume(id: str, fork: bool, fmt: str | None, as_json: bool, quiet: bool) -> 
         }
     )
     if running and not fork:
-        out.hint(f"It is already running ({running.status}); focusing its pane.")
+        out.hint(
+            f"Already running ({running.status}); focused its pane rather than starting again."
+        )
 
 
 @main.group(name="skills")
@@ -379,12 +382,20 @@ def _resolve(conn: sqlite3.Connection, id: str) -> dict:
     return sendero
 
 
-def _report(out: Renderer, conn: sqlite3.Connection, rows: list[dict]) -> None:
+def _report(out: Renderer, rows: list[dict]) -> None:
     out.table(rows)
     if not rows:
         raise NoResults()
-    if changed := index.stale(conn):
-        out.hint(f"{changed} transcripts have changed since the last sync. Run `senderos sync`.")
+
+
+def _next(out: Renderer, id: str, ready: str, *others: str) -> None:
+    """One command ready to run, then the rest of the vocabulary.
+
+    A worked example saves an agent a call on --help. Spelling the id out
+    three times would not: one runnable command and the other verbs is
+    enough to act on.
+    """
+    out.hint(f"Next: senderos {ready.format(id=id)}   (also: {', '.join(others)})")
 
 
 def _row(s: dict) -> dict:
@@ -458,9 +469,10 @@ def _ago(when: int | None) -> str:
     return "just now"
 
 
-def run() -> int:
+def run(argv: list[str] | None = None) -> int:
+    """The entry point, and the whole of the exit-code contract."""
     try:
-        main.main(standalone_mode=False)
+        main.main(args=argv, standalone_mode=False)
     except NoResults:
         return EXIT_NO_RESULTS
     except (click.UsageError, ValueError) as e:

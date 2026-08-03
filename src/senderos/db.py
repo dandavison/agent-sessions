@@ -84,8 +84,13 @@ CREATE VIRTUAL TABLE node_fts USING fts5 (
 """
 
 
-def connect(path: Path = DB_PATH) -> sqlite3.Connection:
-    """Open the index, creating it if this is the first run."""
+def connect(path: Path | None = None) -> sqlite3.Connection:
+    """Open the index, creating it if this is the first run.
+
+    DB_PATH is read now rather than bound as a default, so it can be pointed
+    somewhere else.
+    """
+    path = path if path is not None else DB_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
