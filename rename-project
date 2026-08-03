@@ -1,0 +1,182 @@
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.13"
+# dependencies = []
+# ///
+"""Rename this project, everywhere it names itself.
+
+    ./rename-project agent-sessions recall
+    ./rename-project agent-sessions recall --move --purge-state
+
+A name appears in four shapes and they cannot all be replaced at once: the
+Python package uses underscores, the command and its directories use hyphens,
+and a bare occurrence is prose. Replacing in the wrong order turns
+`from agent_sessions import` into something that no longer imports, so the
+order below runs from most specific to least.
+
+What it does not do: rewrite git history, or rename a coined domain noun. The
+first is deliberate — history is a record of what happened under the old name.
+The second cannot be mechanical: when `senderos` became `agent-sessions`, the
+noun `sendero` became `session`, and only a person could decide that.
+"""
+
+import argparse
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+SUFFIXES = {".py", ".toml", ".md"}
+SKIP = {".venv", ".git", "target", "__pycache__"}
+
+
+def main() -> int:
+    args = parse_args()
+    old, new = args.old, args.new
+    root = Path(__file__).parent.resolve()
+
+    if old == new:
+        return fail(f"{old} is already the name")
+    for name in (old, new):
+        if not re.fullmatch(r"[a-z][a-z0-9-]*", name):
+            return fail(f"{name!r} should be lowercase, digits and hyphens")
+
+    move_package(root, package(old), package(new))
+    edited = rewrite(root, old, new)
+    print(f"rewrote {edited} files")
+
+    relock(root)
+    report_state(old, new)
+
+    if args.purge_state:
+        purge(old)
+    if args.move:
+        moved = move_root(root, new)
+        print(f"\nmoved to {moved}\n  cd {moved}")
+    else:
+        print(f"\nStill to do:\n  mv {root} {root.parent / new}")
+    print(f"  git commit -am 'Rename to {new}'")
+    print(f"  {new} skills add" if shutil.which(new) else f"  uv run {new} skills add")
+    print(f"\nGit history keeps the old name. To see it: git log -S {old}")
+    return 0
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("old", help="current name, e.g. agent-sessions")
+    parser.add_argument("new", help="new name, e.g. recall")
+    parser.add_argument("--move", action="store_true", help="rename the project directory too")
+    parser.add_argument(
+        "--purge-state",
+        action="store_true",
+        help="delete the old index and skill. The index is derived, so this only costs a sync.",
+    )
+    return parser.parse_args()
+
+
+def package(name: str) -> str:
+    return name.replace("-", "_")
+
+
+def move_package(root: Path, old: str, new: str) -> None:
+    source = root / "src" / old
+    if not source.is_dir():
+        print(f"no src/{old}, leaving the layout alone")
+        return
+    run(["git", "mv", f"src/{old}", f"src/{new}"], root)
+    print(f"src/{old} -> src/{new}")
+
+
+def rewrite(root: Path, old: str, new: str) -> int:
+    edited = 0
+    for path in files(root):
+        text = original = path.read_text()
+        for pattern, replacement in substitutions(old, new):
+            text = text.replace(pattern, replacement)
+        if text != original:
+            path.write_text(text)
+            edited += 1
+    return edited
+
+
+def files(root: Path):
+    for path in sorted(root.rglob("*")):
+        if path.is_file() and path.suffix in SUFFIXES and not SKIP & set(path.parts):
+            yield path
+
+
+def substitutions(old: str, new: str) -> list[tuple[str, str]]:
+    """Most specific first. A bare name last, once nothing else can claim it."""
+    old_pkg, new_pkg = package(old), package(new)
+    return [
+        (f"from {old_pkg} import", f"from {new_pkg} import"),
+        (f"from {old_pkg}.", f"from {new_pkg}."),
+        (f"import {old_pkg}", f"import {new_pkg}"),
+        (f'"{old_pkg}.cli:run"', f'"{new_pkg}.cli:run"'),
+        (f"src/{old_pkg}", f"src/{new_pkg}"),
+        (f"~/.{old}", f"~/.{new}"),
+        (f'".{old}"', f'".{new}"'),
+        (f'"{old}"', f'"{new}"'),
+        (f"`{old}`", f"`{new}`"),
+        (f"{old} ", f"{new} "),
+        (old, new),
+    ]
+
+
+def relock(root: Path) -> None:
+    """The lockfile records the project's own name, so it has to be rebuilt."""
+    for stale in (root / "uv.lock", root / ".venv"):
+        if stale.is_dir():
+            shutil.rmtree(stale)
+        elif stale.exists():
+            stale.unlink()
+    run(["uv", "sync", "--quiet"], root)
+    print("relocked and rebuilt the environment")
+
+
+def report_state(old: str, new: str) -> None:
+    for label, path in state(old):
+        if path.exists():
+            print(f"old {label} left in place: {path}   (--purge-state removes it)")
+    for label, path in state(new):
+        if path.exists():
+            print(f"warning: {label} already exists at {path}")
+
+
+def state(name: str) -> list[tuple[str, Path]]:
+    return [
+        ("index", Path.home() / f".{name}"),
+        ("skill", Path.home() / ".agents" / "skills" / name),
+    ]
+
+
+def purge(old: str) -> None:
+    for label, path in state(old):
+        if path.exists():
+            shutil.rmtree(path)
+            print(f"deleted old {label}: {path}")
+
+
+def move_root(root: Path, new: str) -> Path:
+    destination = root.parent / new
+    if destination.exists():
+        raise SystemExit(fail(f"{destination} already exists"))
+    root.rename(destination)
+    return destination
+
+
+def run(command: list[str], cwd: Path) -> None:
+    result = subprocess.run(command, cwd=cwd, capture_output=True, text=True)
+    if result.returncode:
+        raise SystemExit(fail(f"{' '.join(command)}: {result.stderr.strip()}"))
+
+
+def fail(message: str) -> int:
+    print(f"Error: {message}", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

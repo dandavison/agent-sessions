@@ -24,6 +24,7 @@ errors go to stderr, so only data reaches stdout.
     uv run pytest
     uv run ruff format . && uv run ruff check .
     uv run ty check
+    ./rename-project agent-sessions <new-name>   # if it needs another name
 
 Requires [wormhole](https://github.com/dandavison/wormhole) to be running: it owns
 project identity and terminal actuation. If it is down, agent-sessions fails rather than
