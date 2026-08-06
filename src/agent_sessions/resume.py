@@ -9,10 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent_sessions import index, wormhole
+from agent_sessions.sources import Source
 
 
 class NotResumable(ValueError):
-    """A session with nowhere to go: no project means no worktree to resume it in."""
+    """A session with nowhere to go: no project, or no directory to be resumed in."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,9 +38,11 @@ def resume(session: dict, fork: bool = False, at: str = "") -> Resumed:
             " There is nowhere to resume it."
         )
     source = index.SOURCES[session["agent"]]
+    path = _transcript(session)
+    cwd = _cwd(session, source, path)
     if at:
-        native = source.fork_at(_transcript(session), at)
-        wormhole.resume(session["project"], native)
+        native = source.fork_at(path, at)
+        wormhole.resume(project=session["project"], session=native, cwd=cwd)
         return Resumed(
             id=session["id"],
             project=session["project"],
@@ -51,8 +54,9 @@ def resume(session: dict, fork: bool = False, at: str = "") -> Resumed:
 
     running = source.live().get(session["native_id"])
     wormhole.resume(
-        session["project"],
-        session["native_id"],
+        project=session["project"],
+        session=session["native_id"],
+        cwd=cwd,
         fork=fork,
         pid=running.pid if running else None,
     )
@@ -67,5 +71,28 @@ def resume(session: dict, fork: bool = False, at: str = "") -> Resumed:
 def _transcript(session: dict) -> Path:
     path = Path(session["path"])
     if not path.exists():
-        raise NotResumable(f"{path} is gone, so there is no point in it to pick up.")
+        raise NotResumable(f"{path} is gone. Run `agent-sessions sync`.")
     return path
+
+
+def _cwd(session: dict, source: Source, path: Path) -> str:
+    """Where the agent has to be started for it to find this session.
+
+    Not the project's working tree, which is all wormhole could work out on its
+    own: an agent looks for a session in the directory it was had in, and half
+    of mine were had somewhere else — a worktree since removed, or a
+    subdirectory of one. Started anywhere else it finds nothing and exits,
+    leaving a terminal that looks like a resume that did not happen.
+    """
+    cwd = session["cwd"] or ""
+    if not Path(cwd).is_dir():
+        raise NotResumable(
+            f"{session['id']} was had in {cwd or 'a directory that was never recorded'},"
+            " which is gone. There is nowhere to resume it."
+        )
+    if not source.resumable_from(path, cwd):
+        raise NotResumable(
+            f"{session['id']} is filed under {path.parent.name}, which is not where"
+            f" {session['agent']} looks when it is started in {cwd}."
+        )
+    return cwd

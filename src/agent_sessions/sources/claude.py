@@ -57,8 +57,16 @@ class ClaudeSource:
     def render(self, path: Path, tools: bool, whole: bool) -> Iterator[str]:
         return render(_read(path), tools=tools, whole=whole)
 
+    def resumable_from(self, path: Path, cwd: str) -> bool:
+        return path.parent.name == encode(cwd)
+
     def fork_at(self, path: Path, at_uuid: str) -> str:
         return fork_at(path, at_uuid)
+
+
+def encode(cwd: str) -> str:
+    """Claude's name for a cwd's transcript directory. Holds for all 506 of mine."""
+    return cwd.replace("/", "-").replace(".", "-")
 
 
 def _discovered(id: str, path: Path) -> Discovered:

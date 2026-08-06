@@ -30,6 +30,14 @@ class Source(Protocol):
         """
         ...
 
+    def resumable_from(self, path: Path, cwd: str) -> bool:
+        """Whether an agent started in `cwd` would find this transcript.
+
+        Each agent files its transcripts by the directory the session was had
+        in, so the directory to resume in is not a free choice.
+        """
+        ...
+
     def fork_at(self, path: Path, at_uuid: str) -> str:
         """Write a session that ends at `at_uuid`, and return its native id.
 

@@ -39,12 +39,17 @@ def worktrees() -> list[Worktree]:
     ]
 
 
-def resume(project: str, session: str, fork: bool = False, pid: int | None = None) -> None:
+def resume(
+    project: str, session: str, cwd: str, fork: bool = False, pid: int | None = None
+) -> None:
     """Wormhole owns the terminal, so it is what actually starts the agent.
 
-    Given the pid of a session already running, it focuses that pane instead.
+    The project says which window; `cwd` says where in it the agent must be
+    started, which is the directory the session was had in and not necessarily
+    the project's working tree. Given the pid of a session already running,
+    wormhole focuses that pane instead.
     """
-    params = {"project": project, "session": session}
+    params = {"project": project, "session": session, "cwd": cwd}
     if fork:
         params["fork"] = "true"
     if pid:

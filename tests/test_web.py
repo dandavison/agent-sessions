@@ -10,8 +10,9 @@ import orjson
 import pytest
 from conftest import assistant, text_block, tool_result, tool_use, user
 
-from agent_sessions import db, index, web, wormhole
+from agent_sessions import db, index, query, web, wormhole
 from agent_sessions.models import Node, Running, Session
+from agent_sessions.sources.claude import encode
 
 ID = "claude:7e90a7c6-ce43-4dfd-9d7c-8eb01ac7ccf2"
 NATIVE = ID.split(":")[1]
@@ -20,8 +21,16 @@ STRAY = "claude:00000000-0000-0000-0000-000000000000"
 
 @pytest.fixture
 def indexed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """One session in a project, one with nowhere to be resumed, one real transcript."""
-    transcript = tmp_path / f"{NATIVE}.jsonl"
+    """One session in a project, one with nowhere to be resumed, one real transcript.
+
+    The transcript sits where Claude files it — under the directory the session
+    was had in — because resuming depends on the two agreeing.
+    """
+    cwd = tmp_path / "src" / "wormhole"
+    cwd.mkdir(parents=True)
+    projects = tmp_path / "projects" / encode(str(cwd))
+    projects.mkdir(parents=True)
+    transcript = projects / f"{NATIVE}.jsonl"
     records = [
         user("u1", None, "why is conform relocating worktrees"),
         assistant("a1", "u1", [tool_use("Bash")]),
@@ -39,7 +48,7 @@ def indexed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             agent="claude",
             native_id=NATIVE,
             path=str(transcript),
-            cwd="/Users/dan/src/wormhole",
+            cwd=str(cwd),
             project="wormhole",
             title="why is conform relocating worktrees",
             started_at=1_784_990_000,
@@ -79,8 +88,10 @@ def resumes(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     """What wormhole was asked to do, without asking it."""
     calls: list[dict] = []
 
-    def record(project: str, session: str, fork: bool = False, pid: int | None = None) -> None:
-        calls.append({"project": project, "session": session, "fork": fork, "pid": pid})
+    def record(
+        project: str, session: str, cwd: str, fork: bool = False, pid: int | None = None
+    ) -> None:
+        calls.append({"project": project, "session": session, "cwd": cwd, "fork": fork, "pid": pid})
 
     monkeypatch.setattr(wormhole, "resume", record)
     monkeypatch.setattr(index.SOURCES["claude"], "live", dict)
@@ -96,9 +107,17 @@ def test_every_session_listed_carries_a_resume_link(indexed: Path) -> None:
     assert f"/resume/{ID}?fork=1" in body
 
 
-def test_following_the_resume_link_resumes(indexed: Path, resumes: list[dict]) -> None:
+def test_following_the_resume_link_resumes(
+    indexed: Path, resumes: list[dict], tmp_path: Path
+) -> None:
     response = web.handle(f"/resume/{ID}")
-    assert resumes == [{"project": "wormhole", "session": NATIVE, "fork": False, "pid": None}]
+    assert resumes[0] == {
+        "project": "wormhole",
+        "session": NATIVE,
+        "cwd": str(tmp_path / "src" / "wormhole"),
+        "fork": False,
+        "pid": None,
+    }
     assert response.status == 303
     assert response.location.startswith(f"/session/{ID}?")
     assert "Resumed" in response.location
@@ -162,7 +181,9 @@ def test_a_link_can_name_the_point_to_pick_up_from(indexed: Path, resumes: list[
 def test_resuming_at_a_point_leaves_the_session_it_came_from_alone(
     indexed: Path, resumes: list[dict], tmp_path: Path
 ) -> None:
-    transcript = tmp_path / f"{NATIVE}.jsonl"
+    session = query.get(db.connect(), ID)
+    assert session is not None
+    transcript = Path(session["path"])
     before = transcript.read_bytes()
     web.handle(f"/resume/{ID}@a1")
     assert transcript.read_bytes() == before

@@ -381,6 +381,25 @@ def test_unforked_transcript_has_no_edges(tmp_path: Path) -> None:
     assert ingest(tmp_path, linear()).edges == []
 
 
+# --- where a session can be resumed from -----------------------------------
+
+
+def test_a_session_is_found_from_the_directory_it_was_had_in(tmp_path: Path) -> None:
+    path = write(tmp_path, linear())
+    assert ClaudeSource().resumable_from(path, "/Users/dan/src/wormhole")
+    assert not ClaudeSource().resumable_from(path, "/Users/dan/src/wormhole/gui")
+    assert not ClaudeSource().resumable_from(path, "/Users/dan/worktrees/wormhole/x/wormhole")
+
+
+def test_a_dot_in_the_path_is_a_dash_in_the_directory_name(tmp_path: Path) -> None:
+    """Submodule worktrees live under `.git`, and 189 of my sessions were had in one."""
+    project = tmp_path / "-Users-dan-src-devenv--git-modules-dotfiles"
+    project.mkdir()
+    path = project / f"{SESSION}.jsonl"
+    path.touch()
+    assert ClaudeSource().resumable_from(path, "/Users/dan/src/devenv/.git/modules/dotfiles")
+
+
 # --- resuming at a point ---------------------------------------------------
 
 
