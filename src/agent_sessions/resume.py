@@ -42,7 +42,12 @@ def resume(session: dict, fork: bool = False, at: str = "") -> Resumed:
     cwd = _cwd(session, source, path)
     if at:
         native = source.fork_at(path, at)
-        wormhole.resume(project=session["project"], session=native, cwd=cwd)
+        wormhole.run(
+            project=session["project"],
+            cwd=cwd,
+            command=source.resume_command(native),
+            tag=native,
+        )
         return Resumed(
             id=session["id"],
             project=session["project"],
@@ -53,12 +58,14 @@ def resume(session: dict, fork: bool = False, at: str = "") -> Resumed:
         )
 
     running = source.live().get(session["native_id"])
-    wormhole.resume(
+    wormhole.run(
         project=session["project"],
-        session=session["native_id"],
         cwd=cwd,
-        fork=fork,
-        pid=running.pid if running else None,
+        command=source.resume_command(session["native_id"], fork=fork),
+        # A session already running wants focusing, not starting again — unless
+        # forking, which is a request for a second session beside the first.
+        tag=_tag(session["native_id"], fork),
+        pid=running.pid if running and not fork else None,
     )
     return Resumed(
         id=session["id"],
@@ -66,6 +73,15 @@ def resume(session: dict, fork: bool = False, at: str = "") -> Resumed:
         forked=fork,
         was_running=running.status if running else "",
     )
+
+
+def _tag(native_id: str, fork: bool) -> str:
+    """What the pane is for, so that asking twice lands in the same one.
+
+    A fork gets its own: the session it branches into does not exist yet and has
+    no id to name, and it must not land in the pane its parent is sitting in.
+    """
+    return f"{native_id}-fork" if fork else native_id
 
 
 def _transcript(session: dict) -> Path:

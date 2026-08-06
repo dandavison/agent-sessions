@@ -39,22 +39,20 @@ def worktrees() -> list[Worktree]:
     ]
 
 
-def resume(
-    project: str, session: str, cwd: str, fork: bool = False, pid: int | None = None
-) -> None:
-    """Wormhole owns the terminal, so it is what actually starts the agent.
+def run(project: str, cwd: str, command: str, tag: str, pid: int | None = None) -> None:
+    """Wormhole owns the terminal, so it is what actually runs the command.
 
-    The project says which window; `cwd` says where in it the agent must be
-    started, which is the directory the session was had in and not necessarily
-    the project's working tree. Given the pid of a session already running,
-    wormhole focuses that pane instead.
+    It knows about projects and panes and nothing about agents: the command line
+    is ours to compose, and so is `cwd` — the directory the session was had in,
+    which is where the agent has to be started to find it, and not necessarily
+    the project's working tree. `tag` names what the pane is for, so asking twice
+    lands in the same pane; given the pid of something already running, wormhole
+    focuses its pane instead.
     """
-    params = {"project": project, "session": session, "cwd": cwd}
-    if fork:
-        params["fork"] = "true"
+    params = {"project": project, "cwd": cwd, "cmd": command, "tag": tag}
     if pid:
         params["pid"] = str(pid)
-    _post("/conversations/resume-session", params)
+    _post("/terminal/run", params)
 
 
 class Attributor:

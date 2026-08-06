@@ -30,6 +30,15 @@ class Source(Protocol):
         """
         ...
 
+    def resume_command(self, native_id: str, fork: bool = False) -> str:
+        """The command line that picks this session up, for a terminal to run.
+
+        Each agent has its own, and nothing outside this package should have to
+        know what it is: wormhole runs a command in a pane and has no opinion
+        about which.
+        """
+        ...
+
     def resumable_from(self, path: Path, cwd: str) -> bool:
         """Whether an agent started in `cwd` would find this transcript.
 

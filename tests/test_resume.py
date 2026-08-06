@@ -14,6 +14,7 @@ import pytest
 from conftest import assistant, last_prompt, text_block, user
 
 from agent_sessions import index, resume, wormhole
+from agent_sessions.models import Running
 
 NATIVE = "7e90a7c6-ce43-4dfd-9d7c-8eb01ac7ccf2"
 
@@ -27,7 +28,7 @@ def encoded(cwd: Path) -> str:
 def resumes(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     """What wormhole was asked to do, without asking it."""
     calls: list[dict] = []
-    monkeypatch.setattr(wormhole, "resume", lambda **kw: calls.append(kw))
+    monkeypatch.setattr(wormhole, "run", lambda **kw: calls.append(kw))
     monkeypatch.setattr(index.SOURCES["claude"], "live", dict)
     return calls
 
@@ -88,7 +89,7 @@ def test_resuming_at_a_point_lands_in_the_same_place(session: dict, resumes: lis
     (call,) = resumes
     assert call["cwd"] == session["cwd"]
     assert encoded(Path(call["cwd"])) == Path(session["path"]).parent.name
-    assert call["session"] == resumed.resumed_as.split(":")[1]
+    assert resumed.resumed_as.split(":")[1] in call["command"]
 
 
 def test_a_session_whose_directory_is_gone_is_not_resumed(
@@ -111,3 +112,37 @@ def test_a_session_the_agent_could_not_find_from_there_is_not_resumed(
     with pytest.raises(resume.NotResumable):
         resume.resume(session)
     assert resumes == []
+
+
+# --- what to run is ours to say, not wormhole's ----------------------------
+
+
+def test_the_command_line_is_composed_here(session: dict, resumes: list[dict]) -> None:
+    """Wormhole runs a command in a pane and knows nothing about agents."""
+    resume.resume(session)
+    assert resumes[0]["command"] == f"claude -r {NATIVE}"
+
+
+def test_forking_is_spelled_in_the_command(session: dict, resumes: list[dict]) -> None:
+    resume.resume(session, fork=True)
+    assert resumes[0]["command"] == f"claude -r {NATIVE} --fork-session"
+
+
+def test_a_fork_does_not_land_in_the_pane_of_the_session_it_came_from(
+    session: dict, resumes: list[dict]
+) -> None:
+    resume.resume(session)
+    resume.resume(session, fork=True)
+    assert resumes[0]["tag"] != resumes[1]["tag"]
+
+
+def test_a_running_session_is_focused_but_a_fork_of_it_is_not(
+    session: dict, resumes: list[dict], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Focusing is for picking a session up; forking asks for a second one beside it."""
+    monkeypatch.setattr(
+        index.SOURCES["claude"], "live", lambda: {NATIVE: Running(pid=4242, status="waiting")}
+    )
+    resume.resume(session)
+    resume.resume(session, fork=True)
+    assert [call["pid"] for call in resumes] == [4242, None]

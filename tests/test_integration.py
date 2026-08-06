@@ -1,6 +1,6 @@
 """The one thing the unit tests cannot see: whether an agent actually came up.
 
-Every other test stubs `wormhole.resume` and asserts on what it was told. The
+Every other test stubs `wormhole.run` and asserts on what it was told. The
 bugs worth catching live past that line — the wrong directory, keys sent to a
 pane before its shell exists, a dead pane focused forever — and they all look
 the same from here: a terminal, and no agent in it.

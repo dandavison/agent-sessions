@@ -88,12 +88,7 @@ def resumes(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     """What wormhole was asked to do, without asking it."""
     calls: list[dict] = []
 
-    def record(
-        project: str, session: str, cwd: str, fork: bool = False, pid: int | None = None
-    ) -> None:
-        calls.append({"project": project, "session": session, "cwd": cwd, "fork": fork, "pid": pid})
-
-    monkeypatch.setattr(wormhole, "resume", record)
+    monkeypatch.setattr(wormhole, "run", lambda **kw: calls.append(kw))
     monkeypatch.setattr(index.SOURCES["claude"], "live", dict)
     return calls
 
@@ -113,9 +108,9 @@ def test_following_the_resume_link_resumes(
     response = web.handle(f"/resume/{ID}")
     assert resumes[0] == {
         "project": "wormhole",
-        "session": NATIVE,
         "cwd": str(tmp_path / "src" / "wormhole"),
-        "fork": False,
+        "command": f"claude -r {NATIVE}",
+        "tag": NATIVE,
         "pid": None,
     }
     assert response.status == 303
@@ -125,7 +120,7 @@ def test_following_the_resume_link_resumes(
 
 def test_the_fork_link_forks(indexed: Path, resumes: list[dict]) -> None:
     web.handle(f"/resume/{ID}", "fork=1")
-    assert resumes[0]["fork"] is True
+    assert "--fork-session" in resumes[0]["command"]
 
 
 def test_a_running_session_is_focused_rather_than_started_again(
@@ -154,7 +149,7 @@ def test_wormhole_being_down_is_reported_rather_than_raised(
     def refuse(*args: object, **kwargs: object) -> None:
         raise wormhole.WormholeUnavailable()
 
-    monkeypatch.setattr(wormhole, "resume", refuse)
+    monkeypatch.setattr(wormhole, "run", refuse)
     response = web.handle(f"/resume/{ID}")
     assert response.status == 502
     assert "wormhole is not running" in response.body
@@ -172,8 +167,8 @@ def test_a_link_can_name_the_point_to_pick_up_from(indexed: Path, resumes: list[
     response = web.handle(f"/resume/{ID}@a1")
     (call,) = resumes
     assert call["project"] == "wormhole"
-    assert call["session"] not in (NATIVE, None)
-    assert call["fork"] is False
+    assert NATIVE not in call["command"]
+    assert "--fork-session" not in call["command"]
     assert response.status == 303
     assert "a1" in response.location
 
