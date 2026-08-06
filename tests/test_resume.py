@@ -128,12 +128,15 @@ def test_forking_is_spelled_in_the_command(session: dict, resumes: list[dict]) -
     assert resumes[0]["command"] == f"claude -r {NATIVE} --fork-session"
 
 
-def test_a_fork_does_not_land_in_the_pane_of_the_session_it_came_from(
-    session: dict, resumes: list[dict]
+def test_a_fork_is_not_told_about_the_session_it_came_from(
+    session: dict, resumes: list[dict], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    resume.resume(session)
+    """Wormhole focuses what a pid names; a fork is a second session, so it gets none."""
+    monkeypatch.setattr(
+        index.SOURCES["claude"], "live", lambda: {NATIVE: Running(pid=4242, status="waiting")}
+    )
     resume.resume(session, fork=True)
-    assert resumes[0]["tag"] != resumes[1]["tag"]
+    assert resumes[0]["pid"] is None
 
 
 def test_a_running_session_is_focused_but_a_fork_of_it_is_not(

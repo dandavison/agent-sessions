@@ -108,7 +108,6 @@ def test_following_the_resume_link_resumes(
         "project": "wormhole",
         "cwd": str(tmp_path / "src" / "wormhole"),
         "command": f"claude -r {NATIVE}",
-        "tag": NATIVE,
         "pid": None,
     }
     assert response.status == 303
