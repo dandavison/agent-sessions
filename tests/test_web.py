@@ -337,3 +337,62 @@ def test_pages_are_html(indexed: Path) -> None:
     response = web.handle("/")
     assert response.content_type.startswith("text/html")
     assert response.body.startswith("<!doctype html>")
+
+
+# --- ordering and paging ---------------------------------------------------
+
+
+def test_a_column_heading_sorts_by_it(indexed: Path) -> None:
+    body = web.handle("/").body
+    assert "sort=turns" in body
+    assert "sort=title" in body
+
+
+def test_the_column_in_force_turns_around_when_clicked_again(indexed: Path) -> None:
+    body = web.handle("/", "sort=turns").body
+    assert "sort=turns&amp;reverse=1" in body
+    assert "sort=context&amp;reverse=1" not in body
+
+
+def test_reversing_reverses(indexed: Path) -> None:
+    down = web.handle("/", "sort=title").body
+    up = web.handle("/", "sort=title&reverse=1").body
+    assert down.index("relocating worktrees") > down.index("no project")
+    assert up.index("relocating worktrees") < up.index("no project")
+
+
+def test_a_search_has_an_order_of_its_own(indexed: Path) -> None:
+    """Results are ranked by how well they matched, so the headings do not sort."""
+    assert "sort=turns" not in web.handle("/", "q=relocating").body
+
+
+def test_a_filter_keeps_the_order_it_was_read_in(indexed: Path) -> None:
+    assert "name=sort value='turns'" in web.handle("/", "sort=turns").body
+
+
+def test_one_page_of_sessions_needs_no_pager(indexed: Path) -> None:
+    assert "class=pager" not in web.handle("/").body
+
+
+def test_a_full_page_offers_the_next(indexed: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(web, "LIMIT", 1)
+    body = web.handle("/").body
+    assert "page=1" in body
+    assert body.count("<tr>") == 2  # the headings, and one session
+
+
+def test_the_last_page_offers_only_the_way_back(indexed: Path, monkeypatch) -> None:
+    monkeypatch.setattr(web, "LIMIT", 1)
+    body = web.handle("/", "page=1").body
+    assert "page=2" not in body
+    assert ">newer<" in body
+
+
+def test_a_page_says_which_sessions_these_are(indexed: Path, monkeypatch) -> None:
+    monkeypatch.setattr(web, "LIMIT", 1)
+    assert "2–2" in web.handle("/", "page=1").body
+
+
+def test_nonsense_paging_is_the_first_page(indexed: Path) -> None:
+    assert web.handle("/", "page=-3").status == 200
+    assert web.handle("/", "page=lots").status == 200

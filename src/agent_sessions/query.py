@@ -14,7 +14,24 @@ COLUMNS = (
     " n_user_turns, n_messages, context_tokens, output_tokens, dropped_tokens, cwd, git_branch"
 )
 
-SORTS = {"recent": "ended_at DESC", "context": "context_tokens DESC", "turns": "n_user_turns DESC"}
+# What each sort orders by, and which way round it reads best: newest, largest
+# and longest first, but a name A to Z.
+SORTS = {
+    "recent": "ended_at",
+    "project": "project",
+    "context": "context_tokens",
+    "turns": "n_user_turns",
+    "title": "title",
+}
+
+ASCENDING = frozenset({"project", "title"})
+
+
+def order_by(sort: str, reverse: bool = False) -> str:
+    """Sessions missing the value sort last either way: they are not the answer."""
+    column = SORTS[sort]
+    descending = (sort not in ASCENDING) != reverse
+    return f"{column} IS NULL, {column} {'DESC' if descending else 'ASC'}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,16 +76,26 @@ def parse_count(text: str) -> int:
     return int(digits) * scale
 
 
-def recent(conn: sqlite3.Connection, filters: Filters, sort: str, limit: int) -> list[dict]:
+def recent(
+    conn: sqlite3.Connection,
+    filters: Filters,
+    sort: str,
+    limit: int,
+    reverse: bool = False,
+    offset: int = 0,
+) -> list[dict]:
     where, values = filters.where()
     rows = conn.execute(
-        f"SELECT {COLUMNS} FROM session WHERE {where} ORDER BY {SORTS[sort]} LIMIT ?",
-        [*values, limit],
+        f"SELECT {COLUMNS} FROM session WHERE {where}"
+        f" ORDER BY {order_by(sort, reverse)} LIMIT ? OFFSET ?",
+        [*values, limit, offset],
     )
     return [dict(row) for row in rows]
 
 
-def search(conn: sqlite3.Connection, query: str, filters: Filters, limit: int) -> list[dict]:
+def search(
+    conn: sqlite3.Connection, query: str, filters: Filters, limit: int, offset: int = 0
+) -> list[dict]:
     """Sessions with a node matching `query`, best match first.
 
     Ranking blends BM25 with recency: what I am looking for is nearly always
@@ -96,9 +123,9 @@ def search(conn: sqlite3.Connection, query: str, filters: Filters, limit: int) -
         JOIN session ON session.id = best.sid
         WHERE best.n = 1 AND {where}
         ORDER BY best.rank * (1 + {_RECENCY}) ASC
-        LIMIT ?
+        LIMIT ? OFFSET ?
         """,
-        [query, *values, limit],
+        [query, *values, limit, offset],
     )
     return [dict(row) for row in rows]
 

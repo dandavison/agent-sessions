@@ -72,20 +72,25 @@ def _sessions(conn: sqlite3.Connection, params: dict[str, str]) -> Response:
         min_context=params.get("min_context") or None,
     )
     sort = params.get("sort", "") if params.get("sort") in query.SORTS else "recent"
+    reverse = params.get("reverse") in ("1", "true")
+    page = _page_number(params)
     try:
+        # One more than fits, which is how the next page is known to exist
+        # without counting the whole table.
         found = (
-            query.search(conn, text, filters, LIMIT)
+            query.search(conn, text, filters, LIMIT + 1, page * LIMIT)
             if text
-            else query.recent(conn, filters, sort, LIMIT)
+            else query.recent(conn, filters, sort, LIMIT + 1, reverse, page * LIMIT)
         )
     except (ValueError, sqlite3.OperationalError) as e:
         return _page("agent-sessions", _controls(params, sort), _banner(str(e)), status=400)
 
+    more, found = len(found) > LIMIT, found[:LIMIT]
     live = _running()
     rows = "".join(_session_row(s, text, live) for s in found)
     body = (
-        f"<table><thead><tr><th>when<th>project<th>context<th>turns"
-        f"<th>session<th class=right></tr></thead><tbody>{rows}</tbody></table>"
+        f"<table><thead><tr>{_headings(params, sort, reverse, sortable=not text)}"
+        f"<th class=right></tr></thead><tbody>{rows}</tbody></table>"
         if found
         else "<p class=none>Nothing matched.</p>"
     )
@@ -94,8 +99,14 @@ def _sessions(conn: sqlite3.Connection, params: dict[str, str]) -> Response:
         _controls(params, sort),
         _flash(params),
         body,
-        _footer(conn, len(found)),
+        _pager(params, page, len(found), more),
+        _footer(conn),
     )
+
+
+def _page_number(params: dict[str, str]) -> int:
+    page = params.get("page", "0")
+    return int(page) if page.isdigit() else 0
 
 
 def _session_row(s: dict, text: str, live: set[str]) -> str:
@@ -274,10 +285,13 @@ def _page(title: str, *sections: str, status: int = 200) -> Response:
 
 
 def _controls(params: dict[str, str], sort: str) -> str:
-    """The search form, on every page, carrying whatever filters are in force."""
-    sorts = "".join(
-        f"<option value={s}{' selected' if s == sort else ''}>{s}</option>"
-        for s in sorted(query.SORTS)
+    """The search form, on every page, carrying whatever filters are in force.
+
+    The order is chosen by clicking a column, so it travels as a hidden field
+    rather than as a second control for the same thing.
+    """
+    order = f"<input type=hidden name=sort value='{_h(sort)}'>" + (
+        "<input type=hidden name=reverse value=1>" if params.get("reverse") in ("1", "true") else ""
     )
     return (
         "<form class=controls action=/ method=get>"
@@ -285,10 +299,63 @@ def _controls(params: dict[str, str], sort: str) -> str:
         f"<input name=q placeholder='what was said' value='{_h(params.get('q', ''))}'>"
         f"<input name=project placeholder=project value='{_h(params.get('project', ''))}'>"
         f"<input name=since placeholder=since value='{_h(params.get('since', ''))}' size=6>"
-        f"<select name=sort>{sorts}</select>"
+        f"{order}"
         "<button type=submit>find</button>"
         "</form>"
     )
+
+
+# Column heading, and what sorting by it is called.
+HEADINGS = (
+    ("when", "recent"),
+    ("project", "project"),
+    ("context", "context"),
+    ("turns", "turns"),
+    ("session", "title"),
+)
+
+# What a link out of this page carries with it. Not `page`: a new order or a new
+# filter starts again from the top.
+CARRIED = ("q", "project", "since", "agent", "min_context")
+
+
+def _headings(params: dict[str, str], sort: str, reverse: bool, sortable: bool) -> str:
+    """Clicking a column sorts by it, and clicking the one in force turns it around.
+
+    A search has an order of its own — how well each session matched — so while
+    one is in force the headings are only headings.
+    """
+    cells = []
+    for label, name in HEADINGS:
+        if not sortable:
+            cells.append(f"<th>{label}")
+            continue
+        active = name == sort
+        mark = f"<span class=arrow>{'▴' if reverse else '▾'}</span>" if active else ""
+        wanted = {k: v for k, v in params.items() if k in CARRIED and v} | {"sort": name}
+        if active and not reverse:
+            wanted["reverse"] = "1"
+        cells.append(f"<th><a href='/?{_h(urlencode(wanted))}'>{label}</a>{mark}")
+    return "".join(cells)
+
+
+def _pager(params: dict[str, str], page: int, shown: int, more: bool) -> str:
+    """Where in the list this is, and how to leave it. Fifty at a time."""
+    if not page and not more:
+        return ""
+    first = page * LIMIT + 1
+    return (
+        f"<p class=pager>{_page_link(params, page - 1, 'newer') if page else ''}"
+        f"<span class=quiet>{first}–{first + shown - 1}</span>"
+        f"{_page_link(params, page + 1, 'older') if more else ''}</p>"
+    )
+
+
+def _page_link(params: dict[str, str], page: int, label: str) -> str:
+    wanted = {k: v for k, v in params.items() if k in (*CARRIED, "sort", "reverse") and v}
+    if page:
+        wanted["page"] = str(page)
+    return f"<a href='/?{_h(urlencode(wanted))}'>{label}</a>"
 
 
 def _actions(id: str) -> str:
@@ -313,13 +380,10 @@ def _banner(text: str) -> str:
     return f"<p class=banner>{_h(text)}</p>"
 
 
-def _footer(conn: sqlite3.Connection, shown: int) -> str:
+def _footer(conn: sqlite3.Connection) -> str:
     total = conn.execute("SELECT count(*) FROM session").fetchone()[0]
     synced = display.date(db.synced_at(conn), with_time=True) or "never"
-    return (
-        f"<footer>{shown} of {total} sessions · synced {_h(synced)} · "
-        "<a href=/sync>sync</a></footer>"
-    )
+    return f"<footer>{total} sessions · synced {_h(synced)} · <a href=/sync>sync</a></footer>"
 
 
 def _running() -> set[str]:
@@ -379,6 +443,10 @@ tbody tr:hover { background: color-mix(in oklab, var(--fg) 4%, transparent) }
 .live { color: var(--live); margin-left: 6px }
 .button { display: inline-block; padding: 3px 9px; border: 1px solid var(--line);
           border-radius: 6px; font-size: 13px; white-space: nowrap }
+th a { color: inherit; text-decoration: none }
+th a:hover { color: var(--fg) }
+.arrow { color: var(--dim); margin-left: 3px }
+.pager { display: flex; gap: 14px; align-items: baseline; margin: 14px 0; font-size: 13px }
 .resume { color: var(--accent); font-size: 13px; white-space: nowrap }
 /* An action per row is clutter until the row is the one being read. */
 td .resume { opacity: 0; transition: opacity .08s }
