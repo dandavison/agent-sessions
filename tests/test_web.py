@@ -396,3 +396,40 @@ def test_a_page_says_which_sessions_these_are(indexed: Path, monkeypatch) -> Non
 def test_nonsense_paging_is_the_first_page(indexed: Path) -> None:
     assert web.handle("/", "page=-3").status == 200
     assert web.handle("/", "page=lots").status == 200
+
+
+# --- filtering by project, as wormhole names them --------------------------
+
+
+def test_the_project_half_of_a_task_filters_by_the_project(indexed: Path) -> None:
+    """A task key is `project:branch`, and it is usually the project that is wanted."""
+    assert "/?project=wormhole" in web.handle("/").body
+
+
+def test_a_task_can_still_be_filtered_by(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "index.db"
+    conn = db.connect(path)
+    db.write_session(
+        conn,
+        Session(
+            id="claude:t",
+            agent="claude",
+            native_id="t",
+            path=str(tmp_path / "t.jsonl"),
+            project="wormhole:dan/thing",
+            title="a task of a project",
+        ),
+    )
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(db, "DB_PATH", path)
+
+    body = web.handle("/").body
+    assert "'/?project=wormhole'>wormhole</a>" in body
+    assert "project=wormhole%3Adan%2Fthing" in body
+
+
+def test_the_project_box_offers_what_there_is(indexed: Path) -> None:
+    body = web.handle("/").body
+    assert "<datalist id=projects>" in body
+    assert "<option value='wormhole'>" in body

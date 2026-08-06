@@ -136,6 +136,21 @@ def search(
 _RECENCY = "3.0 / (1.0 + (strftime('%s', 'now') - COALESCE(session.ended_at, 0)) / 2592000.0)"
 
 
+def worked_in(conn: sqlite3.Connection) -> tuple[list[str], list[str]]:
+    """The projects worked in and the tasks of them, as wormhole names both.
+
+    A project is the part before the colon and a task is the whole key. Filtering
+    by a project takes in its tasks; filtering by a task is one of them. The
+    filter offers both, so both are counted here.
+    """
+    keys = {
+        row["project"]
+        for row in conn.execute("SELECT DISTINCT project FROM session WHERE project != ''")
+        if row["project"]
+    }
+    return sorted({k.split(":")[0] for k in keys}), sorted(k for k in keys if ":" in k)
+
+
 def get(conn: sqlite3.Connection, id: str) -> dict | None:
     """Resolve a session by full id, bare native id, or any unambiguous prefix."""
     rows = conn.execute(

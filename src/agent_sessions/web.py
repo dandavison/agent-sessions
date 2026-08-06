@@ -83,7 +83,9 @@ def _sessions(conn: sqlite3.Connection, params: dict[str, str]) -> Response:
             else query.recent(conn, filters, sort, LIMIT + 1, reverse, page * LIMIT)
         )
     except (ValueError, sqlite3.OperationalError) as e:
-        return _page("agent-sessions", _controls(params, sort), _banner(str(e)), status=400)
+        return _page(
+            "agent-sessions", _controls(params, sort) + _projects(conn), _banner(str(e)), status=400
+        )
 
     more, found = len(found) > LIMIT, found[:LIMIT]
     live = _running()
@@ -96,7 +98,7 @@ def _sessions(conn: sqlite3.Connection, params: dict[str, str]) -> Response:
     )
     return _page(
         "agent-sessions",
-        _controls(params, sort),
+        _controls(params, sort) + _projects(conn),
         _flash(params),
         body,
         _pager(params, page, len(found), more),
@@ -117,11 +119,7 @@ def _session_row(s: dict, text: str, live: set[str]) -> str:
         if text and s.get("snippet")
         else ""
     )
-    project = (
-        f"<a class=quiet href='/?{urlencode({'project': r['project']})}'>{_h(r['project'])}</a>"
-        if r["project"]
-        else "<span class=none>—</span>"
-    )
+    project = _project(r["project"])
     dot = "<span class=live title='running now'>●</span>" if s["id"] in live else ""
     return (
         f"<tr><td class=when>{_h(r['when'])}<td>{project}<td class=num>{_h(r['context'])}"
@@ -129,6 +127,22 @@ def _session_row(s: dict, text: str, live: set[str]) -> str:
         f"<td><a href='{_link(s['id'])}'>{_h(title)}</a>{dot}{note}"
         f"<td class=right>{_actions(s['id'])}</tr>"
     )
+
+
+def _project(key: str) -> str:
+    """A project, and which task of it, each filtering by itself.
+
+    Wormhole's key names a task as `project:branch`, and most of the time it is
+    the project that is wanted — everything done on that repo, whichever task it
+    was done in — so that is what the first half links to.
+    """
+    if not key:
+        return "<span class=none>—</span>"
+    project, _, task = key.partition(":")
+    cell = f"<a class=quiet href='/?{_h(urlencode({'project': project}))}'>{_h(project)}</a>"
+    if task:
+        cell += f"<a class=quiet href='/?{_h(urlencode({'project': key}))}'>:{_h(task)}</a>"
+    return cell
 
 
 def _session(conn: sqlite3.Connection, id: str, params: dict[str, str]) -> Response:
@@ -145,7 +159,7 @@ def _session(conn: sqlite3.Connection, id: str, params: dict[str, str]) -> Respo
     said = "".join(_turn(session["id"], t) for t in query.turns(conn, session["id"]))
     return _page(
         session["title"] or session["id"],
-        _controls(params, "recent"),
+        _controls(params, "recent") + _projects(conn),
         _flash(params),
         f"<h1>{_h(session['title'] or session['id'])}</h1>",
         f"<p class=actions>{_actions(session['id'])}"
@@ -219,7 +233,7 @@ def _transcript(conn: sqlite3.Connection, id: str, params: dict[str, str]) -> Re
     markdown = "".join(source.render(path, tools=tools, whole=whole))
     return _page(
         session["title"] or session["id"],
-        _controls(params, "recent"),
+        _controls(params, "recent") + _projects(conn),
         f"<h1><a href='{_link(session['id'])}'>{_h(session['title'] or session['id'])}</a></h1>",
         f"<p class=actions>{_toggle(session['id'], 'tools', tools, whole)}"
         f"{_toggle(session['id'], 'whole', whole, tools)}</p>",
@@ -289,6 +303,10 @@ def _controls(params: dict[str, str], sort: str) -> str:
 
     The order is chosen by clicking a column, so it travels as a hidden field
     rather than as a second control for the same thing.
+
+    The project box names a list of what there is to filter by, which the pages
+    that can read the index put beside it. It stays a text box: a name not on
+    the list still works, and the error page has no list to offer.
     """
     order = f"<input type=hidden name=sort value='{_h(sort)}'>" + (
         "<input type=hidden name=reverse value=1>" if params.get("reverse") in ("1", "true") else ""
@@ -297,12 +315,20 @@ def _controls(params: dict[str, str], sort: str) -> str:
         "<form class=controls action=/ method=get>"
         "<a class=brand href=/>agent-sessions</a>"
         f"<input name=q placeholder='what was said' value='{_h(params.get('q', ''))}'>"
-        f"<input name=project placeholder=project value='{_h(params.get('project', ''))}'>"
+        f"<input name=project placeholder=project list=projects"
+        f" value='{_h(params.get('project', ''))}'>"
         f"<input name=since placeholder=since value='{_h(params.get('since', ''))}' size=6>"
         f"{order}"
         "<button type=submit>find</button>"
         "</form>"
     )
+
+
+def _projects(conn: sqlite3.Connection) -> str:
+    """Projects first, then the tasks of them: the coarse filter is the usual one."""
+    projects, tasks = query.worked_in(conn)
+    options = "".join(f"<option value='{_h(name)}'>" for name in (*projects, *tasks))
+    return f"<datalist id=projects>{options}</datalist>"
 
 
 # Column heading, and what sorting by it is called.
