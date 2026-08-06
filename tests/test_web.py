@@ -146,6 +146,37 @@ def test_resuming_something_unknown_is_a_404(indexed: Path, resumes: list[dict])
     assert resumes == []
 
 
+# --- a link is enough to resume at a point ---------------------------------
+
+
+def test_a_link_can_name_the_point_to_pick_up_from(indexed: Path, resumes: list[dict]) -> None:
+    response = web.handle(f"/resume/{ID}@a1")
+    (call,) = resumes
+    assert call["project"] == "wormhole"
+    assert call["session"] not in (NATIVE, None)
+    assert call["fork"] is False
+    assert response.status == 303
+    assert "a1" in response.location
+
+
+def test_resuming_at_a_point_leaves_the_session_it_came_from_alone(
+    indexed: Path, resumes: list[dict], tmp_path: Path
+) -> None:
+    transcript = tmp_path / f"{NATIVE}.jsonl"
+    before = transcript.read_bytes()
+    web.handle(f"/resume/{ID}@a1")
+    assert transcript.read_bytes() == before
+
+
+def test_a_point_no_one_can_find_is_a_404(indexed: Path, resumes: list[dict]) -> None:
+    assert web.handle(f"/resume/{ID}@nope").status == 404
+    assert resumes == []
+
+
+def test_the_shape_offers_to_resume_at_each_point(indexed: Path) -> None:
+    assert f"/resume/{ID}@a1" in web.handle(f"/session/{ID}").body
+
+
 # --- finding things --------------------------------------------------------
 
 

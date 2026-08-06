@@ -170,6 +170,23 @@ def test_a_prefix_is_accepted_everywhere(indexed: Path, run) -> None:
         assert run(command, "7e90a7c6")[0] == 0
 
 
+def test_turns_carry_the_point_to_resume_at(indexed: Path, run) -> None:
+    """A turn is only addressable if its uuid is printed next to it."""
+    _, out, _ = run("show", ID, "--turns")
+    assert "u1" in out
+
+
+def test_the_shape_names_the_point_each_stretch_ends_at(indexed: Path, run) -> None:
+    _, out, _ = run("tree", ID)
+    assert "a1" in out
+
+
+def test_resuming_at_a_point_that_does_not_exist_is_a_usage_error(indexed: Path, run) -> None:
+    code, _, err = run("resume", f"{ID}@nope")
+    assert code == cli.EXIT_USAGE
+    assert "nope" in err
+
+
 def test_query_filters_reach_the_index(indexed: Path, run) -> None:
     assert run("search", "relocating", "-p", "wormhole")[0] == 0
     assert run("search", "relocating", "-p", "temporal")[0] == cli.EXIT_NO_RESULTS

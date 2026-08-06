@@ -221,6 +221,41 @@ def test_get_of_something_absent(conn) -> None:
     assert query.get(conn, "claude:nope") is None
 
 
+# --- points within a session -----------------------------------------------
+
+
+def test_a_point_is_spelled_after_the_id() -> None:
+    assert query.split_point("claude:7dae@a1b2c3d4") == ("claude:7dae", "a1b2c3d4")
+    assert query.split_point("claude:7dae") == ("claude:7dae", "")
+
+
+def with_nodes(conn) -> None:
+    populate(
+        conn,
+        [session("claude:a")],
+        [
+            Node("claude:a", "9f3c1d20", None, 0, "user", 1, "first"),
+            Node("claude:a", "9f3c88aa", "9f3c1d20", 1, "assistant", 2, "a reply"),
+        ],
+    )
+
+
+def test_a_point_resolves_by_prefix(conn) -> None:
+    with_nodes(conn)
+    found = query.node(conn, "claude:a", "9f3c1d")
+    assert found is not None and found["uuid"] == "9f3c1d20"
+
+
+def test_an_ambiguous_point_resolves_to_nothing(conn) -> None:
+    with_nodes(conn)
+    assert query.node(conn, "claude:a", "9f3c") is None
+
+
+def test_a_point_that_is_not_in_this_session(conn) -> None:
+    with_nodes(conn)
+    assert query.node(conn, "claude:a", "nope") is None
+
+
 # --- turns -----------------------------------------------------------------
 
 

@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any
 
 import orjson
+import pytest
 from conftest import (
     ai_title,
     assistant,
@@ -378,6 +379,58 @@ def test_fork_edge_points_at_the_splice(tmp_path: Path) -> None:
 
 def test_unforked_transcript_has_no_edges(tmp_path: Path) -> None:
     assert ingest(tmp_path, linear()).edges == []
+
+
+# --- resuming at a point ---------------------------------------------------
+
+
+def forked_at(tmp_path: Path, records: list[dict[str, Any]], at: str) -> tuple[str, list[dict]]:
+    path = write(tmp_path, records)
+    native = ClaudeSource(tmp_path).fork_at(path, at)
+    written = path.with_name(f"{native}.jsonl")
+    return native, [orjson.loads(line) for line in written.read_bytes().splitlines() if line]
+
+
+def test_a_point_is_resumed_by_writing_a_session_that_ends_there(tmp_path: Path) -> None:
+    """Claude can only resume at a leaf, so the point has to become one."""
+    _, records = forked_at(tmp_path, branched(), "a1")
+    assert [r["uuid"] for r in records] == ["u1", "a1"]
+
+
+def test_the_branch_the_point_is_on_is_the_one_kept(tmp_path: Path) -> None:
+    _, records = forked_at(tmp_path, branched(), "a2")
+    assert [r["uuid"] for r in records] == ["u1", "a1", "u2", "a2"]
+
+
+def test_what_was_written_is_a_session_of_its_own(tmp_path: Path) -> None:
+    native, records = forked_at(tmp_path, branched(), "a1")
+    assert {r["sessionId"] for r in records} == {native}
+    assert native != SESSION
+
+
+def test_each_record_says_where_it_came_from(tmp_path: Path) -> None:
+    """A fork is stamped record by record, exactly as Claude stamps its own."""
+    _, records = forked_at(tmp_path, branched(), "a1")
+    assert all(r["forkedFrom"] == {"sessionId": SESSION, "messageUuid": r["uuid"]} for r in records)
+
+
+def test_the_new_session_indexes_as_a_fork_of_the_old(tmp_path: Path) -> None:
+    native, records = forked_at(tmp_path, branched(), "a1")
+    delta = parse(tmp_path / "-Users-dan-src-wormhole" / f"{native}.jsonl", records)
+    assert delta is not None
+    (edge,) = delta.edges
+    assert edge.child == f"claude:{native}" and edge.parent == f"claude:{SESSION}"
+
+
+def test_a_compaction_summary_is_carried_over(tmp_path: Path) -> None:
+    """Resuming after a compaction needs the boundary and the summary, not the era before it."""
+    _, records = forked_at(tmp_path, compacted(), "u2")
+    assert [r["uuid"] for r in records] == ["c1", "s1", "u2"]
+
+
+def test_a_point_that_is_not_in_the_transcript_is_an_error(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        forked_at(tmp_path, linear(), "no-such-uuid")
 
 
 # --- discovery -------------------------------------------------------------
