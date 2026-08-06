@@ -13,6 +13,7 @@ Design: https://github.com/dandavison/log/issues/289
     agent-sessions tree claude:7e90a7c6              # branch, compaction and fork topology
     agent-sessions cat claude:7e90a7c6 --tools       # the whole thing, tool calls included
     agent-sessions resume claude:7e90a7c6            # pick it back up
+    agent-sessions resume claude:7e90a7c6@9f3c1d20   # pick it back up from a point in it
     agent-sessions serve                             # the same, in a browser
     agent-sessions skills add                        # teach an agent the command surface
 
@@ -24,6 +25,13 @@ errors go to stderr, so only data reaches stdout.
 `http://localhost:7118/resume/claude:7e90a7c6` picks the session back up, and
 `?fork=1` branches it instead. So a link is enough — from the page, a note, a
 chat message, or an agent's output.
+
+A session need not be picked up where it was left. `tree` and `show --turns`
+print the point each stretch and each turn ended at, and `<id>@<point>` resumes
+from there — before a compaction, or before the turn that went wrong. An agent
+can only resume a session at its leaf, so this writes the session that ends at
+that point, exactly as a fork is written, and resumes that. The session it came
+from is not touched.
 
 ## Develop
 

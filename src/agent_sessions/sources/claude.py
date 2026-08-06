@@ -16,6 +16,7 @@ from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import orjson
 
@@ -55,6 +56,9 @@ class ClaudeSource:
 
     def render(self, path: Path, tools: bool, whole: bool) -> Iterator[str]:
         return render(_read(path), tools=tools, whole=whole)
+
+    def fork_at(self, path: Path, at_uuid: str) -> str:
+        return fork_at(path, at_uuid)
 
 
 def _discovered(id: str, path: Path) -> Discovered:
@@ -145,7 +149,12 @@ def _active_branch(nodes: list[dict[str, Any]], leaf_uuid: str | None) -> list[d
     the last record written.
     """
     by_uuid = {n["uuid"]: n for n in nodes}
-    node = by_uuid.get(leaf_uuid or "") or nodes[-1]
+    return _thread_to(by_uuid, by_uuid.get(leaf_uuid or "") or nodes[-1])
+
+
+def _thread_to(
+    by_uuid: dict[str, dict[str, Any]], node: dict[str, Any] | None
+) -> list[dict[str, Any]]:
     chain = []
     seen = set()
     while node and node["uuid"] not in seen:
@@ -351,6 +360,41 @@ def _result_text(content: Any) -> str:
 
 def _json(value: Any) -> str:
     return orjson.dumps(value, option=orjson.OPT_INDENT_2).decode()
+
+
+def fork_at(path: Path, at_uuid: str) -> str:
+    """Write a session that ends where `at_uuid` did, and return its native id.
+
+    Claude resumes a session at its leaf and nowhere else, so picking one up
+    from earlier means handing it a session whose leaf is that point. This is
+    what its own fork writes — the ancestry of the leaf, under a new session
+    id, every record stamped with where it came from — stopped earlier. The
+    session it came from is not touched.
+    """
+    records = _read(path)
+    nodes = [r for r in records if r.get("type") in NODE_TYPES and r.get("uuid")]
+    by_uuid = {n["uuid"]: n for n in nodes}
+    if at_uuid not in by_uuid:
+        raise ValueError(f"{at_uuid} is not a point in {path.name}.")
+
+    thread = {n["uuid"] for n in _thread_to(by_uuid, by_uuid[at_uuid])}
+    parent = nodes[0].get("sessionId") or path.stem
+    native = str(uuid4())
+    path.with_name(f"{native}.jsonl").write_bytes(
+        b"".join(
+            orjson.dumps(_forked(r, native, parent)) + b"\n"
+            for r in records
+            if r.get("uuid") in thread
+        )
+    )
+    return native
+
+
+def _forked(record: dict[str, Any], native: str, parent: str) -> dict[str, Any]:
+    return record | {
+        "sessionId": native,
+        "forkedFrom": {"sessionId": parent, "messageUuid": record["uuid"]},
+    }
 
 
 SESSIONS_DIR = Path.home() / ".claude" / "sessions"

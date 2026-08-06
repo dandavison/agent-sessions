@@ -131,7 +131,7 @@ def _session(conn: sqlite3.Connection, id: str, params: dict[str, str]) -> Respo
         for k, v in display.details(session).items()
         if v
     )
-    said = "".join(_turn(t) for t in query.turns(conn, session["id"]))
+    said = "".join(_turn(session["id"], t) for t in query.turns(conn, session["id"]))
     return _page(
         session["title"] or session["id"],
         _controls(params, "recent"),
@@ -140,28 +140,29 @@ def _session(conn: sqlite3.Connection, id: str, params: dict[str, str]) -> Respo
         f"<p class=actions>{_actions(session['id'])}"
         f" <a class=button href='/transcript/{quote(session['id'], safe=':')}'>transcript</a></p>",
         f"<dl class=details>{fields}</dl>",
-        f"<h2>shape</h2>{_tree(shape)}",
+        f"<h2>shape</h2>{_tree(session['id'], shape)}",
         f"<h2>turns</h2><ol class=turns>{said}</ol>" if said else "",
     )
 
 
-def _turn(t: dict) -> str:
+def _turn(id: str, t: dict) -> str:
     d = display.turn(t)
     context = f"<span class=num>{_h(d['context'])}</span>" if d["context"] else ""
+    point = f"<a class=point href='{_resume_link(id, at=t['uuid'])}'>{_h(d['at'])}</a>"
     return (
-        f"<li class=turn><div class=meta>{_h(d['when'])} · {_h(d['role'])} {context}</div>"
+        f"<li class=turn><div class=meta>{_h(d['when'])} · {_h(d['role'])} {context} {point}</div>"
         f"<div class=text>{_h(d['text'])}</div>"
     )
 
 
-def _tree(shape: topology.Topology) -> str:
+def _tree(id: str, shape: topology.Topology) -> str:
     parts = []
     if origin := shape.forked_from:
         parts.append(
             f"<p class=edge>forked from <a href='{_link(origin['parent'])}'>"
             f"{_h(origin['parent'])}</a> at {_h((origin['at_uuid'] or '')[:8])}</p>"
         )
-    parts.append(f"<ul class=tree>{''.join(_branch(root) for root in shape.roots)}</ul>")
+    parts.append(f"<ul class=tree>{''.join(_branch(id, root) for root in shape.roots)}</ul>")
     for fork in shape.forks:
         parts.append(
             f"<p class=edge>fork → <a href='{_link(fork['child'])}'>{_h(fork['child'])}</a>"
@@ -170,19 +171,27 @@ def _tree(shape: topology.Topology) -> str:
     return "".join(parts)
 
 
-def _branch(segment: topology.Segment) -> str:
-    """The label is styled, not the item: strikethrough on a list item reaches its children."""
+def _branch(id: str, segment: topology.Segment) -> str:
+    """The label is styled, not the item: strikethrough on a list item reaches its children.
+
+    Each stretch links to picking the session up where that stretch ended, which
+    is the reason to be reading its shape at all.
+    """
     classes = " ".join(
         c
         for c, on in (("compaction", bool(segment.compaction)), ("abandoned", segment.abandoned))
         if on
     )
     below = (
-        f"<ul>{''.join(_branch(child) for child in segment.children)}</ul>"
+        f"<ul>{''.join(_branch(id, child) for child in segment.children)}</ul>"
         if segment.children
         else ""
     )
-    return f"<li><span class='{classes}'>{_h(display.describe(segment))}</span>{below}"
+    return (
+        f"<li><span class='{classes}'>{_h(display.describe(segment))}</span> "
+        f"<a class=point href='{_resume_link(id, at=segment.end)}'>"
+        f"{_h(display.point(segment.end))}</a>{below}"
+    )
 
 
 def _transcript(conn: sqlite3.Connection, id: str, params: dict[str, str]) -> Response:
@@ -218,17 +227,25 @@ def _toggle(id: str, name: str, on: bool, other: bool) -> str:
 
 def _resume(conn: sqlite3.Connection, id: str, fork: bool) -> Response:
     """A GET with an effect, deliberately: a link is the whole interface."""
+    id, at = query.split_point(id)
     session = query.get(conn, id)
     if session is None:
         return _error(404, f"No single session matches {id!r}.")
+    point = query.node(conn, session["id"], at) if at else None
+    if at and point is None:
+        return _error(404, f"No single point in {session['id']} matches {at!r}.")
     try:
-        resumed = resume.resume(session, fork=fork)
+        resumed = resume.resume(session, fork=fork, at=point["uuid"] if point else "")
     except resume.NotResumable as e:
         return _error(400, str(e))
     except (WormholeUnavailable, httpx.HTTPError) as e:
         return _error(502, str(e))
 
-    if resumed.was_running and not fork:
+    if resumed.at:
+        message = (
+            f"Resumed in {resumed.project} from {display.point(resumed.at)}, as a new session."
+        )
+    elif resumed.was_running and not fork:
         message = f"Already running ({resumed.was_running}); focused its pane in {resumed.project}."
     else:
         message = f"{'Forked' if fork else 'Resumed'} in {resumed.project}."
@@ -285,8 +302,9 @@ def _link(id: str) -> str:
     return f"/session/{quote(id, safe=':')}"
 
 
-def _resume_link(id: str, fork: bool = False) -> str:
-    return f"/resume/{quote(id, safe=':')}" + ("?fork=1" if fork else "")
+def _resume_link(id: str, fork: bool = False, at: str = "") -> str:
+    point = f"@{at}" if at else ""
+    return f"/resume/{quote(id + point, safe=':@')}" + ("?fork=1" if fork else "")
 
 
 def _flash(params: dict[str, str]) -> str:
@@ -380,6 +398,7 @@ tbody tr:hover { background: color-mix(in oklab, var(--fg) 4%, transparent) }
 .tree li { padding: 2px 0 }
 .tree .compaction { color: var(--dim); font-style: italic }
 .tree .abandoned { color: var(--dim); text-decoration: line-through }
+.point { color: var(--dim); font-size: 12px; font-family: ui-monospace, SFMono-Regular, monospace }
 .turns { list-style: none; padding: 0; margin: 0 }
 .turn { border-top: 1px solid var(--line); padding: 12px 0 }
 .turn .meta { color: var(--dim); font-size: 12px; margin-bottom: 4px }

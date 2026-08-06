@@ -14,7 +14,7 @@ def test_every_command_is_documented() -> None:
 def test_commands_taking_an_id_say_so() -> None:
     text = skill.generate()
     assert "### `agent-sessions show ID`" in text
-    assert "### `agent-sessions resume ID`" in text
+    assert "### `agent-sessions resume ID[@POINT]`" in text
     assert "### `agent-sessions search QUERY`" in text
 
 

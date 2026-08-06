@@ -60,6 +60,7 @@ def details(s: dict) -> dict:
 
 def turn(t: dict) -> dict:
     return {
+        "at": point(t["uuid"]),
         "when": date(t["ts"], with_time=True),
         "role": t["role"],
         "context": tokens(t["context_tokens"]),
@@ -75,6 +76,11 @@ def snippet(text: str, query_text: str) -> str:
     at = next((i for w in words if (i := lowered.find(w)) >= 0), 0)
     start = max(0, at - 40)
     return ("…" if start else "") + flat[start : start + 200]
+
+
+def point(uuid: str | None) -> str:
+    """Where in a session something happened, short enough to type after an id."""
+    return (uuid or "")[:8]
 
 
 def describe(segment: topology.Segment) -> str:

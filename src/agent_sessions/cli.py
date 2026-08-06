@@ -61,6 +61,7 @@ Examples
   $ agent-sessions tree claude:7e90a7c6
   $ agent-sessions cat claude:7e90a7c6 --tools
   $ agent-sessions resume claude:7e90a7c6
+  $ agent-sessions resume claude:7e90a7c6@9f3c1d20
 """,
 )
 @click.version_option()
@@ -237,7 +238,7 @@ def show(id: str, turns_only: bool, fmt: str | None, as_json: bool, quiet: bool)
     if not turns_only:
         out.record(display.details(session))
         out.line("")
-    out.table([display.turn(t) for t in said], quiet_key="uuid")
+    out.table([display.turn(t) for t in said], quiet_key="at")
     _next(out, session["id"], "cat {id} --tools", "tree", "resume", "resume --fork")
 
 
@@ -261,23 +262,21 @@ def tree(id: str, fmt: str | None, as_json: bool, quiet: bool) -> None:
         return
     out.line(f"{session['id']}  {session['project'] or '-'}  {session['title'] or ''}")
     if origin := shape.forked_from:
-        out.line(f"  forked from {origin['parent']} at {_short(origin['at_uuid'])}")
+        out.line(f"  forked from {origin['parent']} at {display.point(origin['at_uuid'])}")
     for i, root in enumerate(shape.roots):
         _draw(out, root, prefix="", last=i == len(shape.roots) - 1)
     for fork in shape.forks:
-        out.line(f"  fork → {fork['child']} at {_short(fork['at_uuid'])}")
+        out.line(f"  fork → {fork['child']} at {display.point(fork['at_uuid'])}")
     _next(out, session["id"], "show {id} --turns", "cat --tools", "resume")
 
 
 def _draw(out: Renderer, segment: topology.Segment, prefix: str, last: bool) -> None:
-    out.line(prefix + ("└─ " if last else "├─ ") + display.describe(segment))
+    """Each stretch is labelled with the point it ends at, which is what `resume` takes."""
+    glyph = "└─ " if last else "├─ "
+    out.line(f"{prefix}{glyph}{display.point(segment.end)}  {display.describe(segment)}")
     below = prefix + ("   " if last else "│  ")
     for i, child in enumerate(segment.children):
         _draw(out, child, below, i == len(segment.children) - 1)
-
-
-def _short(uuid: str | None) -> str:
-    return (uuid or "")[:8]
 
 
 @main.command()
@@ -300,8 +299,15 @@ def cat(id: str, tools: bool, whole: bool) -> None:
         sys.stdout.write(chunk)
 
 
-@main.command()
-@click.argument("id")
+@main.command(
+    epilog="""\b
+Examples
+  $ agent-sessions resume claude:7e90a7c6             # where it was left
+  $ agent-sessions resume claude:7e90a7c6 --fork      # branch, leaving it as it is
+  $ agent-sessions resume claude:7e90a7c6@9f3c1d20    # from a point inside it
+"""
+)
+@click.argument("id", metavar="ID[@POINT]")
 @click.option("--fork", is_flag=True, help="Branch into a new session, leaving this one as it is.")
 @format_option
 def resume(id: str, fork: bool, fmt: str | None, as_json: bool, quiet: bool) -> None:
@@ -310,15 +316,23 @@ def resume(id: str, fork: bool, fmt: str | None, as_json: bool, quiet: bool) -> 
     A session that is already running is not started again: you are taken to
     the pane it is sitting in, whoever started it. Otherwise wormhole splits a
     pane in the project's window and resumes it there.
+
+    `<id>@<point>` picks it up from a point inside it rather than from where it
+    was left — before a compaction, or before a turn that went wrong. `tree`
+    and `show --turns` print the points. Resuming at one is always a fork: what
+    starts is a new session ending there, and this one is left as it is.
     """
     out = renderer(fmt, as_json, quiet)
     conn = db.connect()
-    resumed = resume_session(_resolve(conn, id), fork=fork)
+    session, at = _resolve_point(conn, id)
+    resumed = resume_session(session, fork=fork, at=at)
     out.record(asdict(resumed))
     if resumed.was_running and not fork:
         out.hint(
             f"Already running ({resumed.was_running}); focused its pane rather than starting again."
         )
+    if resumed.at:
+        out.hint(f"{resumed.resumed_as} is new; run `agent-sessions sync` to index it.")
 
 
 @main.command()
@@ -399,6 +413,21 @@ def _resolve(conn: sqlite3.Connection, id: str) -> dict:
             f"no single session matches {id!r}. Try `agent-sessions search` or a longer prefix."
         )
     return session
+
+
+def _resolve_point(conn: sqlite3.Connection, id: str) -> tuple[dict, str]:
+    """`<id>`, or `<id>@<point>` naming somewhere inside it. Both resolve by prefix."""
+    id, at = query.split_point(id)
+    session = _resolve(conn, id)
+    if not at:
+        return session, ""
+    point = query.node(conn, session["id"], at)
+    if point is None:
+        raise click.UsageError(
+            f"no single point in {session['id']} matches {at!r}."
+            " Try `agent-sessions tree` or a longer prefix."
+        )
+    return session, point["uuid"]
 
 
 def _report(out: Renderer, rows: list[dict]) -> None:

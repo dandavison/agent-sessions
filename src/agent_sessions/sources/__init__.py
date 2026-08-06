@@ -29,3 +29,12 @@ class Source(Protocol):
         its own transcript should read.
         """
         ...
+
+    def fork_at(self, path: Path, at_uuid: str) -> str:
+        """Write a session that ends at `at_uuid`, and return its native id.
+
+        An agent resumes a session where it was left, so picking one up from
+        earlier means writing the session it would have been. The original is
+        not touched.
+        """
+        ...

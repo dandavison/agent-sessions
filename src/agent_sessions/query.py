@@ -122,6 +122,23 @@ def get(conn: sqlite3.Connection, id: str) -> dict | None:
     return dict(rows[0])
 
 
+def split_point(id: str) -> tuple[str, str]:
+    """`<session>@<point>`: which session, and where in it to pick up."""
+    session, _, at = id.partition("@")
+    return session, at
+
+
+def node(conn: sqlite3.Connection, session_id: str, at: str) -> dict | None:
+    """Resolve a point in a session by uuid or any unambiguous prefix."""
+    rows = conn.execute(
+        "SELECT uuid, role, text, ts FROM node WHERE session_id = ? AND uuid LIKE ? LIMIT 2",
+        (session_id, f"{at}%"),
+    ).fetchall()
+    if len(rows) != 1:
+        return None
+    return dict(rows[0])
+
+
 def turns(conn: sqlite3.Connection, session_id: str) -> list[dict]:
     """What I said, in order, with how large the context had grown by then.
 
