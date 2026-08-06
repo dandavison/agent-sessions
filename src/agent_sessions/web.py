@@ -85,7 +85,7 @@ def _sessions(conn: sqlite3.Connection, params: dict[str, str]) -> Response:
     rows = "".join(_session_row(s, text, live) for s in found)
     body = (
         f"<table><thead><tr><th>when<th>project<th>context<th>turns"
-        f"<th>session<th class=right>resume</tr></thead><tbody>{rows}</tbody></table>"
+        f"<th>session<th class=right></tr></thead><tbody>{rows}</tbody></table>"
         if found
         else "<p class=none>Nothing matched.</p>"
     )
