@@ -291,15 +291,9 @@ def _controls(params: dict[str, str], sort: str) -> str:
     )
 
 
-TERMINAL_ICON = (Path(__file__).parent / "icons" / "terminal.b64").read_text().strip()
-
-
 def _actions(id: str) -> str:
-    """Wormhole's own terminal icon: this ends in a terminal, and it is wormhole's."""
-    return (
-        f"<a class=terminal href='{_resume_link(id)}' title='Resume'>"
-        f"<img src='data:image/png;base64,{TERMINAL_ICON}' alt=Resume></a>"
-    )
+    """One per row, so it stays out of the way until the row is the one being read."""
+    return f"<a class=resume href='{_resume_link(id)}'>resume</a>"
 
 
 def _link(id: str) -> str:
@@ -385,9 +379,10 @@ tbody tr:hover { background: color-mix(in oklab, var(--fg) 4%, transparent) }
 .live { color: var(--live); margin-left: 6px }
 .button { display: inline-block; padding: 3px 9px; border: 1px solid var(--line);
           border-radius: 6px; font-size: 13px; white-space: nowrap }
-.terminal img { width: 20px; height: 20px; vertical-align: middle; display: block }
-.terminal { display: inline-block; padding: 2px; border-radius: 6px; opacity: .85 }
-.terminal:hover { opacity: 1; background: color-mix(in oklab, var(--fg) 8%, transparent) }
+.resume { color: var(--accent); font-size: 13px; white-space: nowrap }
+/* An action per row is clutter until the row is the one being read. */
+td .resume { opacity: 0; transition: opacity .08s }
+tr:hover td .resume, td .resume:focus-visible { opacity: 1 }
 .button.on { background: color-mix(in oklab, var(--accent) 18%, transparent) }
 .actions { display: flex; gap: 8px; margin: 12px 0 }
 .flash { padding: 9px 12px; border-radius: 6px; margin: 14px 0;
