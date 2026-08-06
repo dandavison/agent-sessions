@@ -22,9 +22,8 @@ nothing truncated for a coding agent, `--json` for anything else. Hints and
 errors go to stderr, so only data reaches stdout.
 
 `serve` puts the index in a browser, where resuming is a GET:
-`http://localhost:7118/resume/claude:7e90a7c6` picks the session back up, and
-`?fork=1` branches it instead. So a link is enough — from the page, a note, a
-chat message, or an agent's output.
+`http://localhost:7118/resume/claude:7e90a7c6` picks the session back up. So a
+link is enough — from the page, a note, a chat message, or an agent's output.
 
 A session need not be picked up where it was left. `tree` and `show --turns`
 print the point each stretch and each turn ended at, and `<id>@<point>` resumes

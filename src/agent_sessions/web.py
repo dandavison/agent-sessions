@@ -46,7 +46,7 @@ def handle(path: str, query_string: str = "") -> Response:
         if path == "/sync":
             return _sync(conn)
         if id := _tail(path, "/resume/"):
-            return _resume(conn, id, fork=params.get("fork") in ("1", "true"))
+            return _resume(conn, id)
         if id := _tail(path, "/transcript/"):
             return _transcript(conn, id, params)
         if id := _tail(path, "/session/"):
@@ -225,7 +225,7 @@ def _toggle(id: str, name: str, on: bool, other: bool) -> str:
     )
 
 
-def _resume(conn: sqlite3.Connection, id: str, fork: bool) -> Response:
+def _resume(conn: sqlite3.Connection, id: str) -> Response:
     """A GET with an effect, deliberately: a link is the whole interface."""
     id, at = query.split_point(id)
     session = query.get(conn, id)
@@ -235,7 +235,7 @@ def _resume(conn: sqlite3.Connection, id: str, fork: bool) -> Response:
     if at and point is None:
         return _error(404, f"No single point in {session['id']} matches {at!r}.")
     try:
-        resumed = resume.resume(session, fork=fork, at=point["uuid"] if point else "")
+        resumed = resume.resume(session, at=point["uuid"] if point else "")
     except resume.NotResumable as e:
         return _error(400, str(e))
     except (WormholeUnavailable, httpx.HTTPError) as e:
@@ -245,10 +245,10 @@ def _resume(conn: sqlite3.Connection, id: str, fork: bool) -> Response:
         message = (
             f"Resumed in {resumed.project} from {display.point(resumed.at)}, as a new session."
         )
-    elif resumed.was_running and not fork:
+    elif resumed.was_running:
         message = f"Already running ({resumed.was_running}); focused its pane in {resumed.project}."
     else:
-        message = f"{'Forked' if fork else 'Resumed'} in {resumed.project}."
+        message = f"Resumed in {resumed.project}."
     return _redirect(f"{_link(session['id'])}?{urlencode({'msg': message})}")
 
 
@@ -291,10 +291,14 @@ def _controls(params: dict[str, str], sort: str) -> str:
     )
 
 
+TERMINAL_ICON = (Path(__file__).parent / "icons" / "terminal.b64").read_text().strip()
+
+
 def _actions(id: str) -> str:
+    """Wormhole's own terminal icon: this ends in a terminal, and it is wormhole's."""
     return (
-        f"<a class='button go' href='{_resume_link(id)}'>resume</a> "
-        f"<a class=button href='{_resume_link(id, fork=True)}'>fork</a>"
+        f"<a class=terminal href='{_resume_link(id)}' title='Resume'>"
+        f"<img src='data:image/png;base64,{TERMINAL_ICON}' alt=Resume></a>"
     )
 
 
@@ -302,9 +306,9 @@ def _link(id: str) -> str:
     return f"/session/{quote(id, safe=':')}"
 
 
-def _resume_link(id: str, fork: bool = False, at: str = "") -> str:
+def _resume_link(id: str, at: str = "") -> str:
     point = f"@{at}" if at else ""
-    return f"/resume/{quote(id + point, safe=':@')}" + ("?fork=1" if fork else "")
+    return f"/resume/{quote(id + point, safe=':@')}"
 
 
 def _flash(params: dict[str, str]) -> str:
@@ -381,7 +385,9 @@ tbody tr:hover { background: color-mix(in oklab, var(--fg) 4%, transparent) }
 .live { color: var(--live); margin-left: 6px }
 .button { display: inline-block; padding: 3px 9px; border: 1px solid var(--line);
           border-radius: 6px; font-size: 13px; white-space: nowrap }
-.button.go { border-color: var(--accent) }
+.terminal img { width: 20px; height: 20px; vertical-align: middle; display: block }
+.terminal { display: inline-block; padding: 2px; border-radius: 6px; opacity: .85 }
+.terminal:hover { opacity: 1; background: color-mix(in oklab, var(--fg) 8%, transparent) }
 .button.on { background: color-mix(in oklab, var(--accent) 18%, transparent) }
 .actions { display: flex; gap: 8px; margin: 12px 0 }
 .flash { padding: 9px 12px; border-radius: 6px; margin: 14px 0;

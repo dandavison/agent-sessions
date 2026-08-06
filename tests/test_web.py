@@ -97,9 +97,7 @@ def resumes(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
 
 
 def test_every_session_listed_carries_a_resume_link(indexed: Path) -> None:
-    body = web.handle("/").body
-    assert f"/resume/{ID}" in body
-    assert f"/resume/{ID}?fork=1" in body
+    assert f"/resume/{ID}" in web.handle("/").body
 
 
 def test_following_the_resume_link_resumes(
@@ -118,9 +116,11 @@ def test_following_the_resume_link_resumes(
     assert "Resumed" in response.location
 
 
-def test_the_fork_link_forks(indexed: Path, resumes: list[dict]) -> None:
+def test_the_ui_does_not_fork(indexed: Path, resumes: list[dict]) -> None:
+    """`/branch` in the session does this, and does it from wherever you have got to."""
+    assert "fork" not in web.handle("/").body
     web.handle(f"/resume/{ID}", "fork=1")
-    assert "--fork-session" in resumes[0]["command"]
+    assert "--fork-session" not in resumes[0]["command"]
 
 
 def test_a_running_session_is_focused_rather_than_started_again(
