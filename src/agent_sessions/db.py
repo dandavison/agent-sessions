@@ -6,7 +6,7 @@ from pathlib import Path
 
 from agent_sessions.models import Compaction, Edge, Node, Session
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 DB_PATH = Path.home() / ".agent-sessions" / "index.db"
 
@@ -39,9 +39,13 @@ CREATE INDEX session_ended_at ON session (ended_at DESC);
 CREATE INDEX session_project ON session (project);
 CREATE UNIQUE INDEX session_path ON session (path);
 
+-- A uuid names a record, not a record of one session: a fork is written as a
+-- copy of its parent's records, uuids and all, so the same uuid is a node of
+-- every session that shares that history. Keyed by uuid alone, the session
+-- indexed last would take those nodes from the others.
 CREATE TABLE node (
   session_id      TEXT NOT NULL REFERENCES session (id) ON DELETE CASCADE,
-  uuid            TEXT PRIMARY KEY,
+  uuid            TEXT NOT NULL,
   parent_uuid     TEXT,
   seq             INTEGER NOT NULL,
   role            TEXT NOT NULL,
@@ -49,7 +53,8 @@ CREATE TABLE node (
   text            TEXT NOT NULL,
   request_id      TEXT,
   context_tokens  INTEGER NOT NULL DEFAULT 0,
-  is_branch_point INTEGER NOT NULL DEFAULT 0
+  is_branch_point INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (session_id, uuid)
 );
 CREATE INDEX node_session ON node (session_id, seq);
 
@@ -62,16 +67,18 @@ CREATE TABLE session_edge (
 );
 CREATE INDEX session_edge_parent ON session_edge (parent);
 
+-- Shared with a fork for the same reason a node is, and keyed the same way.
 CREATE TABLE compaction (
   session_id          TEXT NOT NULL REFERENCES session (id) ON DELETE CASCADE,
-  uuid                TEXT PRIMARY KEY,
+  uuid                TEXT NOT NULL,
   ts                  INTEGER,
   trigger             TEXT,
   pre_tokens          INTEGER,
   post_tokens         INTEGER,
   logical_parent_uuid TEXT,
   anchor_uuid         TEXT,
-  preserved_count     INTEGER
+  preserved_count     INTEGER,
+  PRIMARY KEY (session_id, uuid)
 );
 CREATE INDEX compaction_session ON compaction (session_id);
 
