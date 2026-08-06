@@ -36,6 +36,7 @@ from is not touched.
 ## Develop
 
     uv run pytest
+    AGENT_SESSIONS_INTEGRATION=1 uv run pytest tests/test_integration.py  # own tmux server
     uv run ruff format . && uv run ruff check .
     uv run ty check
     ./rename-project agent-sessions <new-name>   # if it needs another name
