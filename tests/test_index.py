@@ -6,7 +6,7 @@ import orjson
 import pytest
 from conftest import assistant, last_prompt, text_block, user
 
-from agent_sessions import db, index, wormhole
+from agent_sessions import db, index, query, wormhole
 from agent_sessions.sources.claude import ClaudeSource
 
 SESSION = "7e90a7c6-ce43-4dfd-9d7c-8eb01ac7ccf2"
@@ -213,3 +213,47 @@ def test_indexed_counts_sessions_not_files(projects: Path, tmp_path: Path) -> No
     result = index.sync(conn)
 
     assert result.indexed == conn.execute("SELECT count(*) FROM session").fetchone()[0] == 2
+
+
+# --- a fork shares its parent's records ------------------------------------
+
+
+def forked(records: list[dict[str, Any]], parent: str) -> list[dict[str, Any]]:
+    """What Claude writes when a session is forked: the parent's records, uuids and all.
+
+    The copy keeps each record's own uuid — that is what makes the splice exact
+    — so the same uuid is a record of two sessions.
+    """
+    return [
+        {**r, "forkedFrom": {"sessionId": parent, "messageUuid": r["uuid"]}}
+        for r in records
+        if r.get("uuid")
+    ]
+
+
+def test_a_fork_does_not_take_its_parents_nodes(projects: Path, tmp_path: Path) -> None:
+    """Both sessions were had; the records they share belong to both of them."""
+    records = conversation()
+    write(projects, records)
+    write(projects, [*forked(records, SESSION), user("u2", "a1", "carrying on")], session=OTHER)
+    conn = db.connect(tmp_path / "index.db")
+
+    index.sync(conn)
+
+    counted = dict(
+        conn.execute("SELECT session_id, count(*) FROM node GROUP BY session_id").fetchall()
+    )
+    assert counted[f"claude:{SESSION}"] == 2
+    assert counted[f"claude:{OTHER}"] == 3
+
+
+def test_what_was_said_stays_searchable_in_both(projects: Path, tmp_path: Path) -> None:
+    records = conversation("why is conform relocating worktrees")
+    write(projects, records)
+    write(projects, forked(records, SESSION), session=OTHER)
+    conn = db.connect(tmp_path / "index.db")
+
+    index.sync(conn)
+
+    found = query.search(conn, "relocating", query.Filters(), 10)
+    assert {f["id"] for f in found} == {f"claude:{SESSION}", f"claude:{OTHER}"}
