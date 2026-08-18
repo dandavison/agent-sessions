@@ -12,6 +12,7 @@ import click
 
 from agent_sessions import agents, db, display, index, query, render, skill, topology, web
 from agent_sessions.agents import NotInstalled
+from agent_sessions.forget import forget as forget_session
 from agent_sessions.render import Format, Renderer
 from agent_sessions.resume import resume as resume_session
 from agent_sessions.wormhole import WormholeUnavailable
@@ -333,6 +334,63 @@ def resume(id: str, fork: bool, fmt: str | None, as_json: bool, quiet: bool) -> 
         )
     if resumed.at:
         out.hint(f"{resumed.resumed_as} is new; run `agent-sessions sync` to index it.")
+
+
+@main.command()
+@click.argument("id")
+@click.argument("title")
+@format_option
+def rename(id: str, title: str, fmt: str | None, as_json: bool, quiet: bool) -> None:
+    """Give a session a title of my own, in place of the one it was given.
+
+    Written where the agent keeps its own titles, so it survives a sync and
+    shows in the agent's own UI too.
+    """
+    out = renderer(fmt, as_json, quiet)
+    conn = db.connect()
+    session = _resolve(conn, id)
+    index.SOURCES[session["agent"]].retitle(Path(session["path"]), title)
+    db.set_title(conn, session["id"], title)
+    conn.commit()
+    out.record({"id": session["id"], "title": title})
+
+
+@main.command(
+    epilog="""\b
+Examples
+  $ agent-sessions forget claude:7e90a7c6       # by the id Claude prints as it exits
+  $ agent-sessions forget 7e90a7c6              # or any unambiguous prefix of it
+"""
+)
+@click.argument("id")
+@format_option
+def forget(id: str, fmt: str | None, as_json: bool, quiet: bool) -> None:
+    """Take a session out of the index, and its transcript out of the agent's reach.
+
+    Not a delete: the transcript is moved to `~/.agent-sessions/forgotten`, and
+    moving it back is all it would take. Its prompts stop being offered at the
+    agent's input line, which is the other half of being gone.
+
+    A session still running cannot be forgotten — its agent has the file open —
+    so this is for after quitting one, with the id it printed on its way out.
+    """
+    out = renderer(fmt, as_json, quiet)
+    conn = db.connect()
+    out.record(asdict(forget_session(conn, _name(conn, id))) | {"forgotten": True})
+
+
+def _name(conn: sqlite3.Connection, id: str) -> str:
+    """The session that id names, indexed or not.
+
+    The id to hand this is the one Claude prints as it exits, and that session
+    has not been synced: it ended a moment ago. So an id naming a transcript
+    that is there is taken as it is; a prefix still has to be looked up.
+    """
+    agent, _, native_id = id.rpartition(":")
+    for name, source in index.SOURCES.items():
+        if agent in ("", name) and source.locate(native_id):
+            return f"{name}:{native_id}"
+    return _resolve(conn, id)["id"]
 
 
 @main.command()

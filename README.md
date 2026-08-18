@@ -14,6 +14,8 @@ Design: https://github.com/dandavison/log/issues/289
     agent-sessions cat claude:7e90a7c6 --tools       # the whole thing, tool calls included
     agent-sessions resume claude:7e90a7c6            # pick it back up
     agent-sessions resume claude:7e90a7c6@9f3c1d20   # pick it back up from a point in it
+    agent-sessions rename claude:7e90a7c6 doing      # a title of my own
+    agent-sessions forget 7e90a7c6                   # one that was not worth keeping
     agent-sessions serve                             # the same, in a browser
     agent-sessions skills add                        # teach an agent the command surface
 
@@ -31,6 +33,16 @@ from there — before a compaction, or before the turn that went wrong. An agent
 can only resume a session at its leaf, so this writes the session that ends at
 that point, exactly as a fork is written, and resumes that. The session it came
 from is not touched.
+
+Not every session was worth having. `forget` takes one out of the index and its
+transcript out of the agent's reach — to `~/.agent-sessions/forgotten`, so being
+wrong about that costs a move back — along with the prompts it left at the
+agent's input line. A running session is refused, because its agent still has
+the file open; the id to hand it is the one Claude prints as it exits, and that
+works before any sync has seen the session.
+
+`rename` writes the title where the agent keeps its own, so it survives a sync
+and shows in the agent's UI too.
 
 ## Develop
 

@@ -24,6 +24,10 @@ from agent_sessions.models import Compaction, Delta, Discovered, Edge, Node, Run
 
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
+# What I typed, kept apart from the transcripts so the input line can offer it
+# back. Append-only, and every session in the one file.
+HISTORY = Path.home() / ".claude" / "history.jsonl"
+
 # Records that are nodes in the DAG. Everything else is either sidecar state or
 # noise: `attachment` carries injected context, `system` mostly turn timings.
 NODE_TYPES = frozenset({"user", "assistant", "system", "attachment"})
@@ -62,6 +66,15 @@ class ClaudeSource:
 
     def resumable_from(self, path: Path, cwd: str) -> bool:
         return path.parent.name == encode(cwd)
+
+    def locate(self, native_id: str) -> Path | None:
+        return next(iter(sorted(self.root.glob(f"*/{native_id}.jsonl"))), None)
+
+    def retitle(self, path: Path, title: str) -> None:
+        retitle(path, title)
+
+    def expunge(self, path: Path, into: Path) -> Path:
+        return expunge(path, into, HISTORY)
 
     def fork_at(self, path: Path, at_uuid: str) -> str:
         return fork_at(path, at_uuid)
@@ -406,6 +419,56 @@ def _forked(record: dict[str, Any], native: str, parent: str) -> dict[str, Any]:
         "sessionId": native,
         "forkedFrom": {"sessionId": parent, "messageUuid": record["uuid"]},
     }
+
+
+def retitle(path: Path, title: str) -> None:
+    """The record Claude writes when a title is changed in its own UI.
+
+    Sidecar records are last-write-wins, so appending one is the whole of it.
+    """
+    record = {"type": "custom-title", "customTitle": title, "sessionId": path.stem}
+    with path.open("ab") as f:
+        f.write(orjson.dumps(record) + b"\n")
+
+
+def expunge(path: Path, into: Path, history: Path) -> Path:
+    """Move a session out of Claude's reach, prompts and tool output included.
+
+    The directory beside the transcript holds what was too large to inline —
+    tool results, subagent transcripts — and goes with it. The transcript keeps
+    the prompts, so dropping them from the recall file loses nothing.
+    """
+    destination = into / path.parent.name
+    destination.mkdir(parents=True, exist_ok=True)
+    moved = destination / path.name
+    if (beside := path.with_suffix("")).is_dir():
+        beside.replace(destination / beside.name)
+    path.replace(moved)
+    _forget_prompts(history, path.stem)
+    return moved
+
+
+def _forget_prompts(history: Path, native_id: str) -> None:
+    """Drop this session's prompts, keeping whatever arrived while we read.
+
+    Other sessions append to this file as this runs, and it is only ever
+    appended to, so anything past where the read stopped is carried over
+    untouched rather than lost.
+    """
+    if not history.exists():
+        return
+    read = _read_bytes(history)
+    keep = [line for line in read.splitlines(keepends=True) if native_id.encode() not in line]
+    with history.open("rb") as f:
+        f.seek(len(read))
+        arrived_since = f.read()
+    temp = history.with_suffix(f".{os.getpid()}.tmp")
+    temp.write_bytes(b"".join(keep) + arrived_since)
+    temp.replace(history)
+
+
+def _read_bytes(path: Path) -> bytes:
+    return path.read_bytes()
 
 
 SESSIONS_DIR = Path.home() / ".claude" / "sessions"

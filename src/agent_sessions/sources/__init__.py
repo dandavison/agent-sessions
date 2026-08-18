@@ -47,6 +47,26 @@ class Source(Protocol):
         """
         ...
 
+    def locate(self, native_id: str) -> Path | None:
+        """This session's transcript, found without the index. None if it has gone."""
+        ...
+
+    def retitle(self, path: Path, title: str) -> None:
+        """Give the session a title of my own, where the agent keeps its titles.
+
+        Anywhere else and the next sync would read the old one back over it.
+        """
+        ...
+
+    def expunge(self, path: Path, into: Path) -> Path:
+        """Move this transcript, and everything else the session left, out of reach.
+
+        Each agent keeps more than the transcript — prompts for recall at its
+        input line, output too large to inline — and a session is not forgotten
+        while any of it is still there.
+        """
+        ...
+
     def fork_at(self, path: Path, at_uuid: str) -> str:
         """Write a session that ends at `at_uuid`, and return its native id.
 

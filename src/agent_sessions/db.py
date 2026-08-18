@@ -199,6 +199,11 @@ def write_compactions(conn: sqlite3.Connection, compactions: Iterable[Compaction
         )
 
 
+def set_title(conn: sqlite3.Connection, session_id: str, title: str) -> None:
+    """What the next sync will read from the transcript anyway, visible now."""
+    conn.execute("UPDATE session SET title = ? WHERE id = ?", (title, session_id))
+
+
 def forget(conn: sqlite3.Connection, session_ids: Iterable[str]) -> int:
     """Drop agent-sessions whose transcripts have gone, and everything hanging off them."""
     ids = [(i,) for i in session_ids]
