@@ -24,13 +24,19 @@ class Resumed:
     was_running: str
     at: str = ""
     resumed_as: str = ""
+    remote_home: str = ""
 
 
-def resume(session: dict, fork: bool = False, at: str = "") -> Resumed:
+def resume(session: dict, fork: bool = False, at: str = "", remote: bool = False) -> Resumed:
     """Pick a session up, at its leaf or at a point inside it.
 
     Resuming at a point is always a fork: the session it came from is left as
     it is, and what is picked up is a new one that ends there.
+
+    `remote` hands the session to the agent's own remote control, so it can be
+    had from a phone. It is the one thing the agent cannot do for itself: its
+    remote control reaches the session in front of you, and only the terminal
+    can pick up an older one. That is what this index is for.
     """
     if not session["project"]:
         raise NotResumable(
@@ -42,7 +48,11 @@ def resume(session: dict, fork: bool = False, at: str = "") -> Resumed:
     cwd = _cwd(session, source, path)
     if at:
         native = source.fork_at(path, at)
-        wormhole.run(project=session["project"], cwd=cwd, command=source.resume_command(native))
+        wormhole.run(
+            project=session["project"],
+            cwd=cwd,
+            command=source.resume_command(native, remote=remote),
+        )
         return Resumed(
             id=session["id"],
             project=session["project"],
@@ -50,22 +60,31 @@ def resume(session: dict, fork: bool = False, at: str = "") -> Resumed:
             was_running="",
             at=at,
             resumed_as=f"{session['agent']}:{native}",
+            remote_home=source.remote_home if remote else "",
         )
 
     running = source.live().get(session["native_id"])
+    # A session already running wants focusing, not starting again — unless
+    # forking, which is a request for a second session beside the first.
+    focusing = bool(running) and not fork
     wormhole.run(
         project=session["project"],
         cwd=cwd,
-        command=source.resume_command(session["native_id"], fork=fork),
-        # A session already running wants focusing, not starting again — unless
-        # forking, which is a request for a second session beside the first.
-        pid=running.pid if running and not fork else None,
+        # Nothing is started when a pane is being focused, so there is no
+        # command line to put remote control on. Starting a second agent on the
+        # same transcript would not do it either: it leaves remote control off
+        # and the first one running.
+        command=source.resume_command(
+            session["native_id"], fork=fork, remote=remote and not focusing
+        ),
+        pid=running.pid if focusing else None,
     )
     return Resumed(
         id=session["id"],
         project=session["project"],
         forked=fork,
         was_running=running.status if running else "",
+        remote_home=source.remote_home if remote and not focusing else "",
     )
 
 

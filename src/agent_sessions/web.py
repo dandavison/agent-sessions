@@ -46,7 +46,7 @@ def handle(path: str, query_string: str = "") -> Response:
         if path == "/sync":
             return _sync(conn)
         if id := _tail(path, "/resume/"):
-            return _resume(conn, id)
+            return _resume(conn, id, remote=params.get("remote") in ("1", "true"))
         if id := _tail(path, "/transcript/"):
             return _transcript(conn, id, params)
         if id := _tail(path, "/session/"):
@@ -250,7 +250,7 @@ def _toggle(id: str, name: str, on: bool, other: bool) -> str:
     )
 
 
-def _resume(conn: sqlite3.Connection, id: str) -> Response:
+def _resume(conn: sqlite3.Connection, id: str, remote: bool = False) -> Response:
     """A GET with an effect, deliberately: a link is the whole interface."""
     id, at = query.split_point(id)
     session = query.get(conn, id)
@@ -260,15 +260,24 @@ def _resume(conn: sqlite3.Connection, id: str) -> Response:
     if at and point is None:
         return _error(404, f"No single point in {session['id']} matches {at!r}.")
     try:
-        resumed = resume.resume(session, at=point["uuid"] if point else "")
+        resumed = resume.resume(session, at=point["uuid"] if point else "", remote=remote)
     except resume.NotResumable as e:
         return _error(400, str(e))
     except (WormholeUnavailable, httpx.HTTPError) as e:
         return _error(502, str(e))
 
+    # The conversation is not here any more, so neither is the browser that
+    # asked for it. Leaving this page is the whole point of asking.
+    if resumed.remote_home:
+        return _redirect(resumed.remote_home)
     if resumed.at:
         message = (
             f"Resumed in {resumed.project} from {display.point(resumed.at)}, as a new session."
+        )
+    elif resumed.was_running and remote:
+        message = (
+            f"Already running ({resumed.was_running}), and remote control cannot be put on it"
+            " from out here: type /rc in it, or set remoteControlAtStartup."
         )
     elif resumed.was_running:
         message = f"Already running ({resumed.was_running}); focused its pane in {resumed.project}."
@@ -331,13 +340,14 @@ def _projects(conn: sqlite3.Connection) -> str:
     return f"<datalist id=projects>{options}</datalist>"
 
 
-# Column heading, and what sorting by it is called.
+# Column heading, what sorting by it is called, and the class its cells carry —
+# which is how a narrow screen drops the columns it has no room for.
 HEADINGS = (
-    ("when", "recent"),
-    ("project", "project"),
-    ("context", "context"),
-    ("turns", "turns"),
-    ("session", "title"),
+    ("when", "recent", "when"),
+    ("project", "project", ""),
+    ("context", "context", "num"),
+    ("turns", "turns", "num"),
+    ("session", "title", ""),
 )
 
 # What a link out of this page carries with it. Not `page`: a new order or a new
@@ -352,16 +362,17 @@ def _headings(params: dict[str, str], sort: str, reverse: bool, sortable: bool) 
     one is in force the headings are only headings.
     """
     cells = []
-    for label, name in HEADINGS:
+    for label, name, css in HEADINGS:
+        at = f"<th class='{css}'>"
         if not sortable:
-            cells.append(f"<th>{label}")
+            cells.append(f"{at}{label}")
             continue
         active = name == sort
         mark = f"<span class=arrow>{'▴' if reverse else '▾'}</span>" if active else ""
         wanted = {k: v for k, v in params.items() if k in CARRIED and v} | {"sort": name}
         if active and not reverse:
             wanted["reverse"] = "1"
-        cells.append(f"<th><a href='/?{_h(urlencode(wanted))}'>{label}</a>{mark}")
+        cells.append(f"{at}<a href='/?{_h(urlencode(wanted))}'>{label}</a>{mark}")
     return "".join(cells)
 
 
@@ -385,17 +396,25 @@ def _page_link(params: dict[str, str], page: int, label: str) -> str:
 
 
 def _actions(id: str) -> str:
-    """One per row, so it stays out of the way until the row is the one being read."""
-    return f"<a class=resume href='{_resume_link(id)}'>resume</a>"
+    """Two per row, out of the way until the row is the one being read.
+
+    `here` opens a pane on this machine; `phone` puts the session on the agent's
+    own remote control and sends the browser after it, which is the only way to
+    pick an old session up from somewhere that is not this keyboard.
+    """
+    return (
+        f"<a class=resume href='{_resume_link(id)}'>here</a>"
+        f"<a class=resume href='{_resume_link(id, remote=True)}'>phone</a>"
+    )
 
 
 def _link(id: str) -> str:
     return f"/session/{quote(id, safe=':')}"
 
 
-def _resume_link(id: str, at: str = "") -> str:
+def _resume_link(id: str, at: str = "", remote: bool = False) -> str:
     point = f"@{at}" if at else ""
-    return f"/resume/{quote(id + point, safe=':@')}"
+    return f"/resume/{quote(id + point, safe=':@')}" + ("?remote=1" if remote else "")
 
 
 def _flash(params: dict[str, str]) -> str:
@@ -473,7 +492,7 @@ th a { color: inherit; text-decoration: none }
 th a:hover { color: var(--fg) }
 .arrow { color: var(--dim); margin-left: 3px }
 .pager { display: flex; gap: 14px; align-items: baseline; margin: 14px 0; font-size: 13px }
-.resume { color: var(--accent); font-size: 13px; white-space: nowrap }
+.resume { color: var(--accent); font-size: 13px; white-space: nowrap; margin-left: 10px }
 /* An action per row is clutter until the row is the one being read. */
 td .resume { opacity: 0; transition: opacity .08s }
 tr:hover td .resume, td .resume:focus-visible { opacity: 1 }
@@ -502,6 +521,21 @@ tr:hover td .resume, td .resume:focus-visible { opacity: 1 }
               font-family: ui-monospace, SFMono-Regular, Menlo, monospace }
 footer { margin-top: 40px; padding-top: 14px; border-top: 1px solid var(--line);
          color: var(--dim); font-size: 13px }
+
+/* A phone, which is where picking a session up somewhere else is asked for.
+   Nothing hovers, so an action that waits to be hovered is an action that is
+   never found. */
+@media (hover: none) {
+  td .resume { opacity: 1 }
+}
+/* And no room for the columns that are only worth a glance. */
+@media (max-width: 640px) {
+  main { padding: 0 12px 40px }
+  .num { display: none }
+  input[name=q] { flex: 1 0 100% }
+  .resume { margin-left: 14px }
+  td, th { padding: 11px 6px }
+}
 """
 
 

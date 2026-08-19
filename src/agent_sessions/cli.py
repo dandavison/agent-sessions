@@ -306,12 +306,14 @@ Examples
   $ agent-sessions resume claude:7e90a7c6             # where it was left
   $ agent-sessions resume claude:7e90a7c6 --fork      # branch, leaving it as it is
   $ agent-sessions resume claude:7e90a7c6@9f3c1d20    # from a point inside it
+  $ agent-sessions resume claude:7e90a7c6 --remote    # to carry on from a phone
 """
 )
 @click.argument("id", metavar="ID[@POINT]")
 @click.option("--fork", is_flag=True, help="Branch into a new session, leaving this one as it is.")
+@click.option("--remote", is_flag=True, help="Hand it to the agent's remote control, for a phone.")
 @format_option
-def resume(id: str, fork: bool, fmt: str | None, as_json: bool, quiet: bool) -> None:
+def resume(id: str, fork: bool, remote: bool, fmt: str | None, as_json: bool, quiet: bool) -> None:
     """Pick a session back up, in the worktree it belongs to.
 
     A session that is already running is not started again: you are taken to
@@ -322,16 +324,25 @@ def resume(id: str, fork: bool, fmt: str | None, as_json: bool, quiet: bool) -> 
     was left — before a compaction, or before a turn that went wrong. `tree`
     and `show --turns` print the points. Resuming at one is always a fork: what
     starts is a new session ending there, and this one is left as it is.
+
+    `--remote` starts it with the agent's own remote control on, so it can be
+    carried on from a phone. The agent can already do that for the session in
+    front of you; picking up an older one is the part it cannot do, because its
+    session picker runs only in the terminal.
     """
     out = renderer(fmt, as_json, quiet)
     conn = db.connect()
     session, at = _resolve_point(conn, id)
-    resumed = resume_session(session, fork=fork, at=at)
+    resumed = resume_session(session, fork=fork, at=at, remote=remote)
     out.record(asdict(resumed))
     if resumed.was_running and not fork:
         out.hint(
             f"Already running ({resumed.was_running}); focused its pane rather than starting again."
         )
+    if remote and resumed.was_running and not fork:
+        out.hint("Remote control cannot be put on it from out here; type /rc in it.")
+    if resumed.remote_home:
+        out.hint(f"Carry it on at {resumed.remote_home}, or in the Claude app.")
     if resumed.at:
         out.hint(f"{resumed.resumed_as} is new; run `agent-sessions sync` to index it.")
 

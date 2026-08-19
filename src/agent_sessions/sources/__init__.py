@@ -10,6 +10,11 @@ from agent_sessions.models import Delta, Discovered, Running
 class Source(Protocol):
     name: str
 
+    # Where a session handed to this agent's remote control turns up, for the
+    # browser that asked for it to be sent to. The agent's own surface: putting
+    # a live conversation on a phone is its business, not this index's.
+    remote_home: str
+
     def discover(self) -> list[Discovered]:
         """Every transcript this source knows about."""
         ...
@@ -30,12 +35,16 @@ class Source(Protocol):
         """
         ...
 
-    def resume_command(self, native_id: str, fork: bool = False) -> str:
+    def resume_command(self, native_id: str, fork: bool = False, remote: bool = False) -> str:
         """The command line that picks this session up, for a terminal to run.
 
         Each agent has its own, and nothing outside this package should have to
         know what it is: wormhole runs a command in a pane and has no opinion
         about which.
+
+        `remote` asks for the session to be reachable from elsewhere. It still
+        runs here — this is a command line for a pane on this machine — but the
+        conversation is then had wherever the agent puts it.
         """
         ...
 

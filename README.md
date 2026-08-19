@@ -14,6 +14,7 @@ Design: https://github.com/dandavison/log/issues/289
     agent-sessions cat claude:7e90a7c6 --tools       # the whole thing, tool calls included
     agent-sessions resume claude:7e90a7c6            # pick it back up
     agent-sessions resume claude:7e90a7c6@9f3c1d20   # pick it back up from a point in it
+    agent-sessions resume claude:7e90a7c6 --remote    # pick it back up on my phone
     agent-sessions rename claude:7e90a7c6 doing      # a title of my own
     agent-sessions forget 7e90a7c6                   # one that was not worth keeping
     agent-sessions serve                             # the same, in a browser
@@ -26,6 +27,18 @@ errors go to stderr, so only data reaches stdout.
 `serve` puts the index in a browser, where resuming is a GET:
 `http://localhost:7118/resume/claude:7e90a7c6` picks the session back up. So a
 link is enough — from the page, a note, a chat message, or an agent's output.
+
+Add `?remote=1` and the session is started with the agent's own remote control
+on, and the browser is sent after it. This is for the phone. Claude Code can
+already put the session in front of you on a phone; what it cannot do is find
+one from three weeks ago and pick that up, because its session picker runs only
+in the terminal. That is what this index is for. Serve it on an address the
+phone can reach — `agent-sessions serve --host 100.x.x.x` on a tailnet — and
+finding old work and carrying it on are both a tap.
+
+For the session you are in right now, none of this is needed: set
+`remoteControlAtStartup` in `~/.claude/settings.json` and everything you start
+is already on your phone.
 
 A session need not be picked up where it was left. `tree` and `show --turns`
 print the point each stretch and each turn ended at, and `<id>@<point>` resumes

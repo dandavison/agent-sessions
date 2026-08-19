@@ -44,6 +44,7 @@ INTERRUPTIONS = frozenset(
 
 class ClaudeSource:
     name = "claude"
+    remote_home = "https://claude.ai/code"
 
     def __init__(self, root: Path = PROJECTS_DIR) -> None:
         self.root = root
@@ -61,8 +62,12 @@ class ClaudeSource:
     def render(self, path: Path, tools: bool, whole: bool) -> Iterator[str]:
         return render(_read(path), tools=tools, whole=whole)
 
-    def resume_command(self, native_id: str, fork: bool = False) -> str:
-        return f"claude -r {native_id}" + (" --fork-session" if fork else "")
+    def resume_command(self, native_id: str, fork: bool = False, remote: bool = False) -> str:
+        return (
+            f"claude -r {native_id}"
+            + (" --fork-session" if fork else "")
+            + (" --remote-control" if remote else "")
+        )
 
     def resumable_from(self, path: Path, cwd: str) -> bool:
         return path.parent.name == encode(cwd)
