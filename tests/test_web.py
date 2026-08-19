@@ -133,6 +133,53 @@ def test_a_running_session_is_focused_rather_than_started_again(
     assert "Already+running" in response.location
 
 
+# --- and a link is enough to pick it up on a phone -------------------------
+
+
+def test_every_session_listed_can_be_picked_up_remotely(indexed: Path) -> None:
+    """The reason to be reading this page on a phone at all."""
+    assert f"/resume/{ID}?remote=1" in web.handle("/").body
+
+
+def test_following_the_remote_link_hands_the_session_to_the_agents_own_remote_control(
+    indexed: Path, resumes: list[dict]
+) -> None:
+    web.handle(f"/resume/{ID}", "remote=1")
+    assert resumes[0]["command"] == f"claude -r {NATIVE} --remote-control"
+
+
+def test_a_remote_resume_sends_the_browser_where_the_session_now_is(
+    indexed: Path, resumes: list[dict]
+) -> None:
+    """Redirecting off this site is the point: the conversation is not here."""
+    response = web.handle(f"/resume/{ID}", "remote=1")
+    assert response.status == 303
+    assert response.location == "https://claude.ai/code"
+
+
+def test_a_running_session_cannot_be_picked_up_remotely(
+    indexed: Path, resumes: list[dict], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stay here and say so, rather than send a phone to a list without it in."""
+    monkeypatch.setattr(
+        index.SOURCES["claude"], "live", lambda: {NATIVE: Running(pid=4242, status="waiting")}
+    )
+    response = web.handle(f"/resume/{ID}", "remote=1")
+    assert response.location.startswith(f"/session/{ID}?")
+    assert "Already+running" in response.location
+
+
+def test_a_point_can_be_picked_up_remotely(indexed: Path, resumes: list[dict]) -> None:
+    response = web.handle(f"/resume/{ID}@a1", "remote=1")
+    assert "--remote-control" in resumes[0]["command"]
+    assert response.location == "https://claude.ai/code"
+
+
+def test_actions_are_not_hidden_behind_a_hover_a_phone_cannot_do(indexed: Path) -> None:
+    """Per-row actions fade in on hover, and a touch screen never hovers."""
+    assert "hover: none" in web.CSS
+
+
 def test_a_session_without_a_project_says_why_it_cannot_resume(
     indexed: Path, resumes: list[dict]
 ) -> None:

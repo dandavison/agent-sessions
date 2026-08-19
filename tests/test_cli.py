@@ -6,6 +6,7 @@ import pytest
 
 from agent_sessions import cli, db, query
 from agent_sessions.models import Node, Session
+from agent_sessions.resume import Resumed
 
 ID = "claude:7e90a7c6-ce43-4dfd-9d7c-8eb01ac7ccf2"
 
@@ -185,6 +186,26 @@ def test_resuming_at_a_point_that_does_not_exist_is_a_usage_error(indexed: Path,
     code, _, err = run("resume", f"{ID}@nope")
     assert code == cli.EXIT_USAGE
     assert "nope" in err
+
+
+def test_resuming_remotely_says_where_the_session_went(
+    indexed: Path, run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing opens on this machine, so the hint is the whole answer."""
+    monkeypatch.setattr(
+        cli,
+        "resume_session",
+        lambda session, fork=False, at="", remote=False: Resumed(
+            id=session["id"],
+            project="wormhole",
+            forked=False,
+            was_running="",
+            remote_home="https://claude.ai/code" if remote else "",
+        ),
+    )
+    code, _, err = run("resume", ID, "--remote")
+    assert code == 0
+    assert "https://claude.ai/code" in err
 
 
 def test_query_filters_reach_the_index(indexed: Path, run) -> None:

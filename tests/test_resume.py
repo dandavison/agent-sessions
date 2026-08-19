@@ -128,6 +128,47 @@ def test_forking_is_spelled_in_the_command(session: dict, resumes: list[dict]) -
     assert resumes[0]["command"] == f"claude -r {NATIVE} --fork-session"
 
 
+def test_picking_a_session_up_remotely_says_so_in_the_command(
+    session: dict, resumes: list[dict]
+) -> None:
+    """The agent's own remote control is what puts a session on a phone, not us."""
+    resume.resume(session, remote=True)
+    assert resumes[0]["command"] == f"claude -r {NATIVE} --remote-control"
+
+
+def test_a_remote_resume_says_where_to_go_next(session: dict, resumes: list[dict]) -> None:
+    """Nothing to look at on this machine: the session is somewhere else now."""
+    resumed = resume.resume(session, remote=True)
+    assert resumed.remote_home == "https://claude.ai/code"
+
+
+def test_a_local_resume_sends_you_nowhere(session: dict, resumes: list[dict]) -> None:
+    resumed = resume.resume(session)
+    assert resumed.remote_home == ""
+
+
+def test_a_point_can_be_picked_up_remotely_too(session: dict, resumes: list[dict]) -> None:
+    resumed = resume.resume(session, at="u1", remote=True)
+    assert "--remote-control" in resumes[0]["command"]
+    assert resumed.remote_home == "https://claude.ai/code"
+
+
+def test_a_running_session_cannot_be_taken_over_remotely(
+    session: dict, resumes: list[dict], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second agent on the same transcript leaves remote control off and the first one running.
+
+    So there is nowhere to send the phone, and saying that beats sending it to a
+    session list that will not have the session in it.
+    """
+    monkeypatch.setattr(
+        index.SOURCES["claude"], "live", lambda: {NATIVE: Running(pid=4242, status="waiting")}
+    )
+    resumed = resume.resume(session, remote=True)
+    assert resumed.was_running == "waiting"
+    assert resumed.remote_home == ""
+
+
 def test_a_fork_is_not_told_about_the_session_it_came_from(
     session: dict, resumes: list[dict], monkeypatch: pytest.MonkeyPatch
 ) -> None:
