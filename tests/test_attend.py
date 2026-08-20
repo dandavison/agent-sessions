@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from agent_sessions import attend, channel, index
-from agent_sessions.models import Running, Said
+from agent_sessions.models import Ran, Running, Said
 
 
 @dataclass
@@ -253,3 +253,45 @@ def test_taking_a_session_over_is_logged(
     c = FakeChannel([issue()], {4: [prompt()]})
     attend.once(c, conn=None)
     assert "42" in capsys.readouterr().err
+
+
+# --- saying something while a turn is running --------------------------------
+
+
+def test_what_the_turn_does_is_said_as_it_does_it(capsys) -> None:
+    """`--output-format json` says nothing until it exits, and a turn is minutes.
+
+    The turn appends to the transcript as it goes, so the progress is already
+    on disk; watching the file is how it reaches the terminal.
+    """
+    arriving = [
+        [],
+        [Ran(tool="Read", input={"file_path": "/x/a.py"})],
+        [
+            Ran(tool="Read", input={"file_path": "/x/a.py"}),
+            Ran(tool="Bash", input={"command": "pytest"}),
+        ],
+    ]
+    attend.watch(lambda: arriving.pop(0) if len(arriving) > 1 else arriving[0], alive=_alive(3))
+    err = capsys.readouterr().err
+    assert "Read" in err
+    assert "pytest" in err
+
+
+def test_a_block_is_not_reported_twice(capsys) -> None:
+    same = [Ran(tool="Read", input={"file_path": "/x/a.py"})]
+    attend.watch(lambda: same, alive=_alive(4))
+    assert capsys.readouterr().err.count("Read") == 1
+
+
+def test_a_turn_that_says_nothing_still_says_it_is_alive(capsys, monkeypatch) -> None:
+    """Thinking for two minutes and a wedged process look identical otherwise."""
+    monkeypatch.setattr(attend, "HEARTBEAT", 0.0)
+    attend.watch(lambda: [], alive=_alive(2))
+    assert "still going" in capsys.readouterr().err
+
+
+def _alive(times: int):
+    """A process that is running for `times` checks and then is not."""
+    checks = iter([True] * times + [False] * 100)
+    return lambda: next(checks)

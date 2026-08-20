@@ -20,6 +20,7 @@ from conftest import (
 
 from agent_sessions.models import Delta, Running
 from agent_sessions.sources.claude import ClaudeSource, parse
+from agent_sessions.sources.claude import _read as read
 from agent_sessions.sources.claude import live as claude_live
 from agent_sessions.sources.claude import render as claude_render
 
@@ -677,3 +678,15 @@ def test_a_turn_is_resumed_headlessly_and_asked_only_for_its_summary() -> None:
         "--output-format",
         "json",
     ]
+
+
+def test_a_transcript_being_written_to_can_still_be_read(tmp_path: Path) -> None:
+    """A turn appends while I read, so the last line is sometimes half a line.
+
+    Progress comes from watching the file grow during a turn, so this is the
+    normal case, not a corrupt file.
+    """
+    path = tmp_path / "s.jsonl"
+    whole = orjson.dumps(user("u1", None, "hello"))
+    path.write_bytes(whole + b"\n" + whole[:20])
+    assert [r["uuid"] for r in read(path)] == ["u1"]
