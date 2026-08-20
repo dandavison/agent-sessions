@@ -305,3 +305,24 @@ def test_a_progress_comment_is_ours_but_is_not_an_answer() -> None:
     running = channel.Comment(id=13, body=f"{channel.RUNNING}\nWorking…", author="a[bot]")
     assert running.is_ours
     assert running.is_progress
+
+
+# --- asking for a rewind by tapping once --------------------------------------
+
+
+def test_a_thumbs_down_asks_for_a_rewind() -> None:
+    down = MINE | {"reactions": {"-1": 1}}
+    c = channel_over({"GET /repos/dandavison/agent-work/issues/4/comments": [down]})
+    assert c.comments(4)[0].rewind_wanted
+
+
+def test_no_thumbs_down_asks_for_nothing() -> None:
+    c = channel_over({"GET /repos/dandavison/agent-work/issues/4/comments": [MINE]})
+    assert not c.comments(4)[0].rewind_wanted
+
+
+def test_a_comment_can_be_deleted() -> None:
+    seen: list[httpx.Request] = []
+    c = channel_over({"DELETE /repos/dandavison/agent-work/issues/comments/13": {}}, seen)
+    c.delete(13)
+    assert seen[-1].method == "DELETE"
