@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_sessions import attending, resume
+from agent_sessions import attending, resume, wormhole
 
 NATIVE = "7e90a7c6-ce43-4dfd-9d7c-8eb01ac7ccf2"
 
@@ -68,7 +68,14 @@ def test_a_hold_by_a_process_still_alive_is_a_hold(locks: Path) -> None:
 def test_a_session_mid_turn_is_not_resumed(
     locks: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The hazard the lock exists for: `live()` cannot see the turn that is running."""
+    """The hazard the lock exists for: `live()` cannot see the turn that is running.
+
+    Asserted on the handoff rather than only on the message: a path can contain
+    any word, and this test once passed because pytest's own temporary
+    directory is named after it.
+    """
+    called: list[dict] = []
+    monkeypatch.setattr(wormhole, "run", lambda **kw: called.append(kw))
     cwd = tmp_path / "src" / "wormhole"
     cwd.mkdir(parents=True)
     session = {
@@ -80,5 +87,6 @@ def test_a_session_mid_turn_is_not_resumed(
         "project": "wormhole",
     }
     Path(session["path"]).write_text("{}\n")
-    with attending.holding(NATIVE), pytest.raises(resume.NotResumable, match="turn"):
+    with attending.holding(NATIVE), pytest.raises(resume.NotResumable, match="already running"):
         resume.resume(session)
+    assert called == []

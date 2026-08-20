@@ -8,7 +8,7 @@ neither of them makes it.
 from dataclasses import dataclass
 from pathlib import Path
 
-from agent_sessions import index, wormhole
+from agent_sessions import attending, index, wormhole
 from agent_sessions.sources import Source
 
 
@@ -38,6 +38,13 @@ def resume(session: dict, fork: bool = False, at: str = "", remote: bool = False
     remote control reaches the session in front of you, and only the terminal
     can pick up an older one. That is what this index is for.
     """
+    # First, because it is the one an agent cannot tell us about itself: a
+    # headless turn registers nowhere, so `live()` below would not see it.
+    if attending.held(session["native_id"]):
+        raise NotResumable(
+            f"{session['id']} has a turn already running on it from the control channel."
+            " Resuming would put two agents on one transcript."
+        )
     if not session["project"]:
         raise NotResumable(
             f"{session['id']} has no project: its cwd was {session['cwd']}."

@@ -17,7 +17,7 @@ from typing import Any, Protocol
 
 import orjson
 
-from agent_sessions import channel, comment, index, query
+from agent_sessions import attending, channel, comment, index, query
 
 # What a prompt from the park may do. A bare `Bash` is every command there is,
 # so it is not on the list; the commands that are, are named. Editing is here
@@ -94,7 +94,11 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
             control.post(issue.number, refusal)
             continue
         assert session is not None
-        control.post(issue.number, comment.render(run_turn(session, prompt.body, ALLOWED)))
+        # Held for the length of the turn, so a resume from the terminal is
+        # refused rather than opening a second agent on the same transcript.
+        with attending.holding(session["native_id"]):
+            events = run_turn(session, prompt.body, ALLOWED)
+        control.post(issue.number, comment.render(events))
         answered += 1
     _restate(control, issue, session)
     return answered
