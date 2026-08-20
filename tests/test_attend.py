@@ -79,12 +79,14 @@ def turns(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     """What the agent was asked to do, without asking it."""
     ran: list[dict] = []
 
-    def fake(session: dict, text: str, showing=None) -> tuple[list[Said], dict]:
+    def fake(session: dict, text: str, showing=None) -> tuple[list[Said], dict, str]:
         ran.append({"session": session["id"], "prompt": text})
-        return [Said(role="assistant", text="Done.")], {}
+        return [Said(role="assistant", text="Done.")], {}, "leafbefore"
 
     monkeypatch.setattr(attend, "run_turn", fake)
     monkeypatch.setattr(index.SOURCES["claude"], "live", dict)
+    # The body is read off the transcript now, and these sessions have none.
+    monkeypatch.setattr(index.SOURCES["claude"], "blocks", lambda path, since="": [])
     return ran
 
 
@@ -142,11 +144,16 @@ def test_every_prompt_waiting_is_answered(turns: list[dict], found) -> None:
     assert [t["prompt"] for t in turns] == ["first", "second"]
 
 
-def test_the_body_is_kept_up_to_date_with_what_i_have_said(turns: list[dict], found) -> None:
-    """The one view the timeline cannot give, so it has to be maintained."""
+def test_the_body_is_kept_up_to_date(turns: list[dict], found) -> None:
+    """The one view the timeline cannot give, so it has to be maintained.
+
+    It used to assert that a posted comment appears here; it asserts the
+    frontmatter now, because the list beneath comes from the transcript rather
+    than from the thread.
+    """
     c = FakeChannel([issue()], {4: [prompt(11, "first")]})
     attend.once(c, conn=None)
-    assert "first" in c.bodies[4]
+    assert "claude:7e90" in c.bodies[4]
 
 
 # --- what it refuses ----------------------------------------------------------
@@ -499,3 +506,10 @@ def test_a_rewind_does_not_also_run_the_prompt_it_undid(
     c = FakeChannel([issue()], {4: [down, answered()]})
     attend.once(c, conn=None)
     assert turns == []
+
+
+def test_the_answer_records_the_point_it_can_be_rewound_to(turns: list[dict], found) -> None:
+    """Without this the tap has nowhere to go, and the rewind is only a design."""
+    c = FakeChannel([issue()], {4: [prompt()]})
+    attend.once(c, conn=None)
+    assert comment.point(c.edited[-1][1]) == "leafbefore"

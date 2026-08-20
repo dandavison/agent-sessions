@@ -67,6 +67,17 @@ A turn appends to the session's own transcript, so `sync`, `search`, `show` and
 open in a pane at home is taken over: two agents on one transcript fork it and
 then fight over which branch is live, and I am not at that keyboard.
 
+The transcript is the truth about the conversation — it is what the agent
+resumes from — and the issue is a projection of it. The body lists the turns in
+the session, not the comments in the thread, so a prompt that never ran does
+not appear there claiming to have happened.
+
+👎 on either half of an exchange rewinds: the session is forked at the point
+recorded in the answer, the issue is repointed at the fork, and what was
+rewound over is deleted. Nothing is destroyed — the fork leaves the original
+session whole, so the history is in the transcript, which is why the thread
+does not need to keep it. Then post the prompt you meant.
+
 `agent-work[bot]` is what the loop posts as, `<!-- agent-work:turn -->` marks
 what it wrote before there was a bot, and 👀 marks a prompt it has taken up.
 All of it lives on GitHub, not in the index, which is safe to delete — losing

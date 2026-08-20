@@ -61,6 +61,7 @@ class Control(Protocol):
     def comments(self, number: int) -> list[channel.Comment]: ...
     def post(self, number: int, body: str) -> int: ...
     def edit(self, comment_id: int, body: str) -> None: ...
+    def delete(self, comment_id: int) -> None: ...
     def take_up(self, comment_id: int) -> None: ...
     def set_body(self, number: int, body: str) -> None: ...
     def open(self, title: str, body: str) -> channel.Issue: ...
@@ -113,6 +114,8 @@ def once(control: Control, conn: Any) -> int:
 
 
 def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
+    if _rewind(control, conn, issue):
+        return 0
     waiting = unanswered(control.comments(issue.number))
     if not waiting:
         return 0
@@ -141,12 +144,14 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
         # Held for the length of the turn, so a resume from the terminal is
         # refused rather than opening a second agent on the same transcript.
         with attending.holding(session["native_id"]):
-            blocks, summary = run_turn(session, prompt.body, showing=_shown(control, note, started))
+            blocks, summary, before = run_turn(
+                session, prompt.body, showing=_shown(control, note, started)
+            )
         log.say(
             f"#{issue.number} answered in {time.monotonic() - started:.0f}s"
             f" — {len(blocks)} blocks, ${summary.get('total_cost_usd', 0):.2f}"
         )
-        body = channel.MARKER + "\n" + displaced + comment.render(blocks, summary)
+        body = channel.MARKER + "\n" + displaced + comment.render(blocks, summary, at_uuid=before)
         control.edit(note, body)
         log.say(f"#{issue.number} posted {len(body):,} chars")
         answered += 1
@@ -165,6 +170,46 @@ def _shown(control: Control, note: int, started: float) -> Callable[[list[Block]
         control.edit(note, comment.working("", blocks, time.monotonic() - started))
 
     return show
+
+
+def _rewind(control: Control, conn: Any, issue: channel.Issue) -> bool:
+    """Put the session back the way it was before whichever exchange I thumbed down.
+
+    A tap on my prompt and a tap on the answer to it mean the same thing, so
+    both resolve to the point the answer recorded. Nothing is destroyed: the
+    fork writes a new session and leaves the old one whole, which is why the
+    thread can drop what was rewound over — the transcript still has it.
+    """
+    comments = control.comments(issue.number)
+    asked = next((i for i, c in enumerate(comments) if c.rewind_wanted), None)
+    if asked is None:
+        return False
+    # An exchange is my prompt and the answer to it. Tapping the answer means
+    # undoing both, so the deleting starts at the prompt either way.
+    start = asked
+    while start > 0 and comments[start].is_ours:
+        start -= 1
+    at_uuid = next((c.point for c in comments[start:] if c.point), "")
+    session = lookup(conn, issue.session_id)
+    if session is None or not at_uuid:
+        log.problem(f"#{issue.number} cannot rewind: no point recorded for that exchange")
+        control.post(issue.number, f"{comment.MARKER}\nNothing here records where to rewind to.")
+        return True
+
+    source = index.SOURCES[session["agent"]]
+    native = source.fork_at(Path(session["path"]), at_uuid)
+    forked = f"{session['agent']}:{native}"
+    log.say(f"#{issue.number} rewound to {at_uuid[:8]}, now {forked}")
+    reindex(conn)
+    for gone in comments[start:]:
+        control.delete(gone.id)
+    control.set_body(issue.number, comment.body(session | {"id": forked}, _said(session)))
+    return True
+
+
+def reindex(conn: Any) -> None:
+    """A fork is a session nothing has read yet, and lookup reads the index."""
+    index.sync(conn)
 
 
 def unanswered(comments: list[channel.Comment]) -> list[channel.Comment]:
@@ -224,10 +269,23 @@ def take_over(pid: int) -> None:
 
 
 def _restate(control: Control, issue: channel.Issue, session: dict[str, Any] | None) -> None:
-    """Keep the body current: it is the only place my turns appear without the agent's."""
-    prompts = [c.body for c in control.comments(issue.number) if not c.is_ours]
-    control.set_body(issue.number, comment.body(session or {"id": issue.session_id}, prompts))
-    log.detail(f"#{issue.number} body restated with {len(prompts)} prompts")
+    """Keep the body current: the only place my turns appear without the agent's.
+
+    Read off the transcript rather than off the thread. A prompt that never ran
+    — interrupted, or posted while the loop was down — is on GitHub and not in
+    the session, and the body should not assert a turn the agent has never
+    heard of.
+    """
+    control.set_body(
+        issue.number, comment.body(session or {"id": issue.session_id}, _said(session))
+    )
+
+
+def _said(session: dict[str, Any] | None) -> list[str]:
+    if session is None:
+        return []
+    blocks = index.SOURCES[session["agent"]].blocks(Path(session["path"]))
+    return [b.text for b in blocks if isinstance(b, Said) and b.role == "user"]
 
 
 def lookup(conn: Any, session_id: str) -> dict[str, Any] | None:
@@ -236,8 +294,11 @@ def lookup(conn: Any, session_id: str) -> dict[str, Any] | None:
 
 def run_turn(
     session: dict[str, Any], prompt: str, showing: Callable[[list[Block]], None] | None = None
-) -> tuple[list[Block], dict[str, Any]]:
+) -> tuple[list[Block], dict[str, Any], str]:
     """One headless turn, in the directory the session was had in.
+
+    Returns where the transcript ended before it ran, too: that is the point a
+    rewind of this turn goes back to, and only this knows it.
 
     A turn appends to the session's own transcript, so what it said is read
     back from there rather than parsed off stdout: one parser, and the comment
@@ -255,7 +316,7 @@ def run_turn(
         showing=showing,
     )
     blocks = source.blocks(path, since=before)
-    return (blocks or [_failed(done)]), _summary(done.stdout)
+    return (blocks or [_failed(done)]), _summary(done.stdout), before
 
 
 def _spawn(
