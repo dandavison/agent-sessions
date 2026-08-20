@@ -13,7 +13,7 @@ from datetime import datetime
 
 # A poll every five seconds would bury everything worth reading, so the
 # per-poll detail is asked for rather than endured.
-VERBOSE = False
+VERBOSE: bool = False
 
 PROBLEM = "!!"
 

@@ -13,7 +13,6 @@ without one.
 import html
 import socket
 import sqlite3
-import sys
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -21,7 +20,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 import httpx
 
-from agent_sessions import attend, channel, db, display, index, query, resume, topology
+from agent_sessions import attend, channel, db, display, index, log, query, resume, topology
 from agent_sessions.wormhole import WormholeUnavailable
 
 HOST = "127.0.0.1"
@@ -581,7 +580,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def log_message(self, format: str, *args: object) -> None:  # http.server names it
-        print(f"{self.command} {self.path}", file=sys.stderr)
+        log.say(f"{self.command} {self.path}")
 
 
 def listener(host: str = HOST, port: int = PORT) -> ThreadingHTTPServer:

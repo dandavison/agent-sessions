@@ -7,10 +7,11 @@ handing a URL to a phone that costs nothing to do again when the address moves.
 """
 
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
-from agent_sessions import cli, web
+from agent_sessions import cli, log, web
 
 
 class FakeServer:
@@ -133,8 +134,9 @@ def test_the_poll_detail_is_behind_a_flag(served, capsys, monkeypatch) -> None:
 
 
 def test_what_the_pages_are_asked_for_is_stamped(capsys) -> None:
-    """A bare `GET /` in a scrollback says nothing about when."""
-    from agent_sessions import log, web
-
-    web._Handler.log_message(None, "%s", "ignored")  # type: ignore[arg-type]
-    assert log.stamp()[:2] in capsys.readouterr().err
+    """A bare `GET /` in a scrollback says nothing about when it happened."""
+    asked = cast(web._Handler, SimpleNamespace(command="GET", path="/session/claude:7e90"))
+    web._Handler.log_message(asked, "%s", "ignored")
+    err = capsys.readouterr().err
+    assert "GET /session/claude:7e90" in err
+    assert log.stamp()[:2] in err

@@ -20,6 +20,7 @@ from agent_sessions import (
     db,
     display,
     index,
+    log,
     query,
     render,
     skill,
@@ -455,16 +456,18 @@ def issue(id: str, fmt: str | None, as_json: bool, quiet: bool) -> None:
     help="Seconds between polls. A poll that finds nothing costs no rate limit.",
 )
 @click.option("--once", "single", is_flag=True, help="One pass, rather than staying up.")
-def attend_channel(interval: float, single: bool) -> None:
+@click.option("--verbose", is_flag=True, help="Say something on every poll, not just events.")
+def attend_channel(interval: float, single: bool, verbose: bool) -> None:
     """Answer prompts left on the control channel, until interrupted.
 
     Polls for comments, runs each turn in the worktree its session belongs to,
     and posts the result back. A turn runs under my own settings, so a comment
     on the issue is allowed whatever I am allowed.
     """
+    log.VERBOSE = verbose
     conn = db.connect()
     control = channel.Channel()
-    print(f"attending {control.repo}, every {interval:g}s", file=sys.stderr)
+    log.say(f"attending {control.repo}, every {interval:g}s")
     if single:
         attend.once(control, conn)
         return
@@ -477,8 +480,11 @@ def attend_channel(interval: float, single: bool) -> None:
 @click.option("--host", default=web.HOST, show_default=True, help="Which address to bind.")
 @click.option("--lan", is_flag=True, help="Serve to the rest of the network, for a phone.")
 @click.option("--attend", "attending_too", is_flag=True, help="Answer the control channel too.")
+@click.option("--verbose", is_flag=True, help="Say something on every poll, not just events.")
 @click.option("--open/--no-open", "open_browser", default=True, help="Open a browser at it.")
-def serve(port: int, host: str, lan: bool, attending_too: bool, open_browser: bool) -> None:
+def serve(
+    port: int, host: str, lan: bool, attending_too: bool, verbose: bool, open_browser: bool
+) -> None:
     """Serve the index in a browser, where a link is enough to resume.
 
     `/resume/<id>` resumes on a GET, so that URL is clickable from anywhere a URL
@@ -500,6 +506,7 @@ def serve(port: int, host: str, lan: bool, attending_too: bool, open_browser: bo
     print(f"agent-sessions at {local}", file=sys.stderr)
     if lan:
         _announce(web.reachable(port))
+    log.VERBOSE = verbose
     server = _bound(host, port)
     if attending_too:
         _attend_beside(server)
@@ -528,7 +535,7 @@ def _attend_beside(server: Any) -> None:
     socket is already bound by the time the thread gets it.
     """
     control = channel.Channel()
-    print(f"attending {control.repo}, every {attend.INTERVAL:g}s", file=sys.stderr)
+    log.say(f"attending {control.repo}, every {attend.INTERVAL:g}s")
     Thread(target=server.serve_forever, daemon=True).start()
     with suppress(KeyboardInterrupt), server:
         attend.loop(control, db.connect())
