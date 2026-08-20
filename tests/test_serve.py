@@ -31,11 +31,13 @@ def test_asking_for_the_lan_binds_every_interface(served, capsys) -> None:
 
 
 def test_a_lan_serve_names_an_address_a_phone_could_use(served, capsys) -> None:
-    """Loopback is no use to a phone, and it is the only address `serve` knew about."""
+    """Loopback is no use to a phone, and it is the only address `serve` knew about.
+
+    It still says loopback too, which is where the browser on this machine goes.
+    """
     cli.run(["serve", "--lan", "--no-open"])
     err = capsys.readouterr().err
     assert [url for url in web.reachable(web.PORT) if url in err]
-    assert "127.0.0.1" not in err
 
 
 def test_a_lan_serve_puts_the_address_on_the_terminal_as_a_qr_code(served, capsys) -> None:

@@ -9,6 +9,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 import click
+import segno
 
 from agent_sessions import agents, db, display, index, query, render, skill, topology, web
 from agent_sessions.agents import NotInstalled
@@ -407,20 +408,39 @@ def _name(conn: sqlite3.Connection, id: str) -> str:
 @main.command()
 @click.option("--port", default=web.PORT, show_default=True, help="Which port to listen on.")
 @click.option("--host", default=web.HOST, show_default=True, help="Which address to bind.")
+@click.option("--lan", is_flag=True, help="Serve to the rest of the network, for a phone.")
 @click.option("--open/--no-open", "open_browser", default=True, help="Open a browser at it.")
-def serve(port: int, host: str, open_browser: bool) -> None:
+def serve(port: int, host: str, lan: bool, open_browser: bool) -> None:
     """Serve the index in a browser, where a link is enough to resume.
 
     `/resume/<id>` resumes on a GET, so that URL is clickable from anywhere a URL
     can be clicked — a note, a chat message, an agent's output — not only from
     this UI. Runs until interrupted.
+
+    `--lan` serves it to the rest of the network, which is how a phone gets to
+    it, and prints a QR code so nobody has to read an address out. Everything
+    on that network can then reach every conversation you have had, and resume
+    one, so it is asked for rather than assumed.
     """
-    url = f"http://{host}:{port}/"
-    print(f"agent-sessions at {url}", file=sys.stderr)
+    if lan:
+        host = web.EVERY_INTERFACE
+    local = f"http://{web.HOST}:{port}/"
+    print(f"agent-sessions at {local}", file=sys.stderr)
+    if lan:
+        _announce(web.reachable(port))
     if open_browser:
-        webbrowser.open(url)
+        webbrowser.open(local)
     with suppress(KeyboardInterrupt):
         web.serve(host, port)
+
+
+def _announce(urls: list[str]) -> None:
+    """A QR of the first address, and the rest in writing for a phone that cannot scan."""
+    for url in urls:
+        print(f"           and at {url}", file=sys.stderr)
+    # Compact, because a cell per module is twice as tall as it is wide and the
+    # code comes out too big for a terminal to show at once.
+    segno.make(urls[0]).terminal(out=sys.stderr, border=2, compact=True)
 
 
 @main.command(

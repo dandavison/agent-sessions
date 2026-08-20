@@ -11,6 +11,7 @@ without one.
 """
 
 import html
+import socket
 import sqlite3
 import sys
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ from agent_sessions import db, display, index, query, resume, topology
 from agent_sessions.wormhole import WormholeUnavailable
 
 HOST = "127.0.0.1"
+EVERY_INTERFACE = "0.0.0.0"  # Asked for by name, never the default.
 PORT = 7118
 LIMIT = 50
 
@@ -565,3 +567,32 @@ class _Handler(BaseHTTPRequestHandler):
 def serve(host: str = HOST, port: int = PORT) -> None:
     with ThreadingHTTPServer((host, port), _Handler) as server:
         server.serve_forever()
+
+
+def reachable(port: int) -> list[str]:
+    """The addresses something that is not this machine could ask for the index at.
+
+    The mDNS name first, because the router hands out a new address whenever it
+    feels like it and the name outlives that. The address itself second, for
+    the phones whose resolver does not do mDNS — most Android ones.
+    """
+    names = [name for name in (_mdns_name(), _lan_address()) if name]
+    return [f"http://{name}:{port}/" for name in names]
+
+
+def _mdns_name() -> str:
+    """`<host>.local`, which is what this machine answers to on the local network."""
+    name = socket.gethostname()
+    return name if name.endswith(".local") else ""
+
+
+def _lan_address() -> str:
+    """The address of the interface that reaches the rest of the network.
+
+    Asking a UDP socket where it would send names the right interface without
+    sending anything or caring which of the several this machine has is the one
+    a phone can get to. The address is documentation-only, so nothing is routed.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        probe.connect(("192.0.2.1", 9))
+        return probe.getsockname()[0]

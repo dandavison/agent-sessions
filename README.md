@@ -18,6 +18,7 @@ Design: https://github.com/dandavison/log/issues/289
     agent-sessions rename claude:7e90a7c6 doing      # a title of my own
     agent-sessions forget 7e90a7c6                   # one that was not worth keeping
     agent-sessions serve                             # the same, in a browser
+    agent-sessions serve --lan                       # ... and on my phone, via a QR code
     agent-sessions skills add                        # teach an agent the command surface
 
 Output adapts to who is asking: an aligned table for a terminal, TSV with
@@ -32,9 +33,11 @@ Add `?remote=1` and the session is started with the agent's own remote control
 on, and the browser is sent after it. This is for the phone. Claude Code can
 already put the session in front of you on a phone; what it cannot do is find
 one from three weeks ago and pick that up, because its session picker runs only
-in the terminal. That is what this index is for. Serve it on an address the
-phone can reach — `agent-sessions serve --host 100.x.x.x` on a tailnet — and
-finding old work and carrying it on are both a tap.
+in the terminal. That is what this index is for. `serve --lan` puts it where a phone can
+reach it and prints a QR code of the address, so getting there is pointing a
+camera at the terminal rather than reading an address out. Everything on that
+network can then reach every conversation you have had, and resume one, which
+is why it is asked for and not the default.
 
 For the session you are in right now, none of this is needed: set
 `remoteControlAtStartup` in `~/.claude/settings.json` and everything you start
