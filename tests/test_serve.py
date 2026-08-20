@@ -119,3 +119,22 @@ def test_a_port_already_taken_is_an_error_not_a_dead_thread(monkeypatch, capsys)
     assert cli.run(["serve", "--attend", "--no-open"]) == cli.EXIT_USAGE
     assert "7118" in capsys.readouterr().err
     assert attended == []
+
+
+def test_the_poll_detail_is_behind_a_flag(served, capsys, monkeypatch) -> None:
+    """Every five seconds, forever: on by default it would bury what matters."""
+    monkeypatch.setattr(cli.channel, "Channel", lambda: SimpleNamespace(repo="dan/agent-work"))
+    monkeypatch.setattr(cli.attend, "loop", lambda *a, **k: None)
+    monkeypatch.setattr(cli.log, "VERBOSE", False)
+    cli.run(["serve", "--attend", "--no-open"])
+    assert cli.log.VERBOSE is False
+    cli.run(["serve", "--attend", "--verbose", "--no-open"])
+    assert cli.log.VERBOSE is True
+
+
+def test_what_the_pages_are_asked_for_is_stamped(capsys) -> None:
+    """A bare `GET /` in a scrollback says nothing about when."""
+    from agent_sessions import log, web
+
+    web._Handler.log_message(None, "%s", "ignored")  # type: ignore[arg-type]
+    assert log.stamp()[:2] in capsys.readouterr().err
