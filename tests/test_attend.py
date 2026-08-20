@@ -220,11 +220,11 @@ def test_a_pass_that_fails_does_not_end_the_loop(monkeypatch: pytest.MonkeyPatch
     reason to say so and poll again, not to stop answering until I get home.
     """
 
-    class Broken:
-        def issues(self):
+    class Broken(FakeChannel):
+        def issues(self) -> list[channel.Issue]:
             raise RuntimeError("github said 502")
 
-    attend.a_pass(Broken(), conn=None)
+    attend.a_pass(Broken([]), conn=None)
     assert "github said 502" in capsys.readouterr().err
 
 

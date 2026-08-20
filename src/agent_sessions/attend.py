@@ -28,7 +28,7 @@ from typing import Any, Protocol
 
 import orjson
 
-from agent_sessions import attending, channel, comment, index, query
+from agent_sessions import attending, channel, comment, index, log, query
 from agent_sessions.models import Block, Said
 
 INTERVAL = 5.0
@@ -67,14 +67,30 @@ def issue_for(control: Control, session: dict[str, Any]) -> channel.Issue:
 
 def loop(control: Control, conn: Any, interval: float = INTERVAL) -> None:
     while True:
-        once(control, conn)
+        a_pass(control, conn)
         time.sleep(interval)
+
+
+def a_pass(control: Control, conn: Any) -> int:
+    """One pass, and whatever went wrong in it is not the end of the loop.
+
+    This runs for hours while I am out. A blip at GitHub, a turn that dies, a
+    transcript that moved — each is a reason to say so and poll again, not to
+    stop answering until I get home.
+    """
+    try:
+        return once(control, conn)
+    except Exception as e:  # noqa: BLE001 — the loop outliving the pass is the point
+        log.problem(f"{type(e).__name__}: {e}")
+        return 0
 
 
 def once(control: Control, conn: Any) -> int:
     """One pass over every open issue. Returns how many prompts were answered."""
     answered = 0
-    for issue in control.issues():
+    issues = control.issues()
+    log.detail(f"polled: {len(issues)} open")
+    for issue in issues:
         if not issue.session_id:
             continue
         answered += _attend(control, conn, issue)
@@ -88,20 +104,27 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
     session = lookup(conn, issue.session_id)
     answered = 0
     for prompt in waiting:
+        log.say(f"#{issue.number} picked up: {_oneline(prompt.body)}")
         # The eyes first: a turn takes minutes, and without them it looks from
         # the park like the prompt fell on the floor.
         control.take_up(prompt.id)
         if session is None:
+            log.problem(f"#{issue.number} names {issue.session_id}, which is not a session")
             control.post(
                 issue.number,
                 f"No session matches `{issue.session_id}`. Fix the table in the issue body.",
             )
             continue
         displaced = _clear_the_way(session)
+        started = time.monotonic()
         # Held for the length of the turn, so a resume from the terminal is
         # refused rather than opening a second agent on the same transcript.
         with attending.holding(session["native_id"]):
             blocks, summary = run_turn(session, prompt.body)
+        log.say(
+            f"#{issue.number} answered in {time.monotonic() - started:.0f}s)"
+            f" — {len(blocks)} blocks, ${summary.get('total_cost_usd', 0):.2f}"
+        )
         control.post(issue.number, displaced + comment.render(blocks, summary))
         answered += 1
     _restate(control, issue, session)
@@ -119,11 +142,17 @@ def _clear_the_way(session: dict[str, Any]) -> str:
     running = index.SOURCES[session["agent"]].live().get(session["native_id"])
     if not running:
         return ""
+    log.say(f"taking {session['id']} over from pid {running.pid} ({running.status})")
     take_over(running.pid)
     return (
         f"<sub>Taken over from a terminal ({running.status});"
         " resume it to pick it back up.</sub>\n\n"
     )
+
+
+def _oneline(text: str) -> str:
+    first = text.strip().splitlines()[0] if text.strip() else ""
+    return first if len(first) <= 80 else first[:77] + "…"
 
 
 def take_over(pid: int) -> None:
