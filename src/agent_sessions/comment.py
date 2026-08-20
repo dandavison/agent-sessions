@@ -21,6 +21,8 @@ from typing import Any
 
 import orjson
 
+from agent_sessions.models import Block, Boundary, Ran, Said
+
 # What GitHub accepts in one comment. Truncation is not a nicety: a test run
 # clears this on its own and the post would simply fail.
 LIMIT = 65_536
@@ -75,19 +77,27 @@ LANGUAGES = {
 PATH_KEYS = ("file_path", "path", "notebook_path")
 
 
-def render(events: list[dict[str, Any]]) -> str:
-    """One turn's stream-json as the comment to post for it."""
-    results = _results(events)
+def render(blocks: list[Block], summary: dict[str, Any] | None = None) -> str:
+    """A turn as the comment to post for it: a formatter over the one parser.
+
+    The same blocks the terminal and the pages are shown, so a conversation
+    cannot read one way here and another way there.
+    """
     parts: list[str] = []
-    for event in events:
-        if event.get("type") != "assistant":
-            continue
-        for block in _blocks(event):
-            if block.get("type") == "text":
-                parts.append(block.get("text", "").strip())
-            elif block.get("type") == "tool_use":
-                parts.append(_tool(block, results.get(block.get("id", ""))))
-    parts.append(_footer(events))
+    for block in blocks:
+        match block:
+            case Said(role="assistant", text=text):
+                parts.append(text.strip())
+            case Ran():
+                parts.append(_tool(block))
+            case Boundary():
+                parts.append(
+                    f"<sub>Compacted ({block.trigger}): "
+                    f"{block.pre_tokens:,} → {block.post_tokens:,} tokens</sub>"
+                )
+            case _:
+                pass
+    parts.append(_footer(summary))
     return _fit(redact("\n\n".join(p for p in parts if p)))
 
 
@@ -126,36 +136,16 @@ def _quote(prompt: str) -> str:
     return first if len(first) <= 120 else first[:117] + "…"
 
 
-def _blocks(event: dict[str, Any]) -> list[dict[str, Any]]:
-    content = event.get("message", {}).get("content")
-    return [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
-
-
-def _results(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Tool results arrive as their own user event, keyed back to the call."""
-    return {
-        block["tool_use_id"]: block
-        for event in events
-        if event.get("type") == "user"
-        for block in _blocks(event)
-        if block.get("type") == "tool_result" and block.get("tool_use_id")
-    }
-
-
-def _tool(call: dict[str, Any], result: dict[str, Any] | None) -> str:
+def _tool(call: Ran) -> str:
     """A tool call folded away, saying enough in the summary to not need opening."""
-    name = call.get("name", "tool")
-    argument = call.get("input", {}) or {}
-    fenced = _input(name, argument)
-    output = _output(result)
-    mark = "❌ " if result and result.get("is_error") else ""
+    mark = "❌ " if call.is_error else ""
     return (
-        f"<details><summary>{mark}<code>{name}</code> {_gist(argument)}</summary>\n\n"
-        f"{fenced}\n{output}</details>"
+        f"<details><summary>{mark}<code>{call.tool}</code> {_gist(call.input)}</summary>\n\n"
+        f"{_input(call.tool, call.input)}\n{_output(call.output)}</details>"
     )
 
 
-def _gist(argument: dict[str, Any]) -> str:
+def _gist(argument: dict[str, object]) -> str:
     """The one line that says what this call was, for a summary nobody opens."""
     for key in ("command", "pattern", "query", *PATH_KEYS):
         if value := argument.get(key):
@@ -163,7 +153,7 @@ def _gist(argument: dict[str, Any]) -> str:
     return ""
 
 
-def _input(name: str, argument: dict[str, Any]) -> str:
+def _input(name: str, argument: dict[str, object]) -> str:
     """Fenced as whatever it is, because highlighting is the point of the medium."""
     if language := FENCES.get(name):
         return _fence(language, str(argument.get("command", "")))
@@ -172,25 +162,15 @@ def _input(name: str, argument: dict[str, Any]) -> str:
     return _fence("json", orjson.dumps(argument, option=orjson.OPT_INDENT_2).decode())
 
 
-def _language(argument: dict[str, Any]) -> str:
+def _language(argument: dict[str, object]) -> str:
     for key in PATH_KEYS:
         if path := argument.get(key):
             return LANGUAGES.get(Path(str(path)).suffix, "")
     return ""
 
 
-def _output(result: dict[str, Any] | None) -> str:
-    if result is None:
-        return ""
-    return _fence("", _clip(_result_text(result.get("content")), 4_000)) + "\n"
-
-
-def _result_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "\n".join(b.get("text", "") for b in content if isinstance(b, dict))
-    return ""
+def _output(output: str) -> str:
+    return _fence("", _clip(output, 4_000)) + "\n" if output else ""
 
 
 def _fence(language: str, text: str) -> str:
@@ -203,12 +183,12 @@ def _clip(text: str, limit: int) -> str:
     return f"{text[:limit]}\n\n… truncated, {len(text) - limit:,} more characters"
 
 
-def _footer(events: list[dict[str, Any]]) -> str:
-    done = next((e for e in reversed(events) if e.get("type") == "result"), None)
-    if done is None:
+def _footer(summary: dict[str, Any] | None) -> str:
+    """What the turn cost, which is the one thing the transcript does not hold."""
+    if not summary:
         return ""
-    cost = done.get("total_cost_usd")
-    turns = done.get("num_turns")
+    cost = summary.get("total_cost_usd")
+    turns = summary.get("num_turns")
     bits = [b for b in (f"{turns} steps" if turns else "", f"${cost:.2f}" if cost else "") if b]
     return f"<sub>{' · '.join(bits)}</sub>" if bits else ""
 

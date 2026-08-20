@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from agent_sessions import attend, channel, index
-from agent_sessions.models import Running
+from agent_sessions.models import Running, Said
 
 
 @dataclass
@@ -63,9 +63,9 @@ def turns(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     """What the agent was asked to do, without asking it."""
     ran: list[dict] = []
 
-    def fake(session: dict, text: str, allowed: list[str]) -> list[dict]:
+    def fake(session: dict, text: str, allowed: list[str]) -> tuple[list[Said], dict]:
         ran.append({"session": session["id"], "prompt": text, "allowed": allowed})
-        return [{"type": "assistant", "message": {"content": [{"type": "text", "text": "Done."}]}}]
+        return [Said(role="assistant", text="Done.")], {}
 
     monkeypatch.setattr(attend, "run_turn", fake)
     monkeypatch.setattr(index.SOURCES["claude"], "live", dict)

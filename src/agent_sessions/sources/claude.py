@@ -20,7 +20,19 @@ from uuid import uuid4
 
 import orjson
 
-from agent_sessions.models import Compaction, Delta, Discovered, Edge, Node, Running, Session
+from agent_sessions.models import (
+    Block,
+    Boundary,
+    Compaction,
+    Delta,
+    Discovered,
+    Edge,
+    Node,
+    Ran,
+    Running,
+    Said,
+    Session,
+)
 
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
@@ -62,6 +74,12 @@ class ClaudeSource:
     def render(self, path: Path, tools: bool, whole: bool) -> Iterator[str]:
         return render(_read(path), tools=tools, whole=whole)
 
+    def blocks(self, path: Path, since: str = "") -> list[Block]:
+        return blocks(_read(path), since=since)
+
+    def leaf(self, path: Path) -> str:
+        return leaf(_read(path))
+
     def resume_command(self, native_id: str, fork: bool = False, remote: bool = False) -> str:
         return (
             f"claude -r {native_id}"
@@ -75,9 +93,10 @@ class ClaudeSource:
             "-p",
             "--resume",
             native_id,
+            # Not stream-json: what was said is read back off the transcript,
+            # so all that is wanted here is the closing summary.
             "--output-format",
-            "stream-json",
-            "--verbose",
+            "json",
             "--allowedTools",
             *allowed,
         ]
@@ -354,42 +373,104 @@ def _epoch(timestamp: str | None) -> int | None:
     return int(datetime.fromisoformat(timestamp).timestamp())
 
 
+def blocks(records: list[dict[str, Any]], whole: bool = False, since: str = "") -> list[Block]:
+    """The conversation, in the order it happened, as the shape a reader wants.
+
+    The one parser. Everywhere a conversation is shown — the terminal, the
+    pages `serve` puts up, a comment on the control channel — is a formatter
+    over this and nothing more, so none of them can drift from the others as
+    the transcript format moves.
+
+    A call and its result arrive on separate records and are put back together
+    here, because no reader has ever wanted them apart. `since` gives only what
+    came after a point, which is how a turn just run is told from the rest.
+    """
+    nodes = [r for r in records if r.get("type") in NODE_TYPES and r.get("uuid")]
+    if not whole:
+        nodes = _active_branch(nodes, _sidecar_state(records).get("leafUuid"))
+    if since:
+        nodes = _after(nodes, since)
+    boundaries = {c.uuid for c in _compactions("", records)}
+    results = _tool_results(nodes)
+
+    out: list[Block] = []
+    for node in nodes:
+        if node["uuid"] in boundaries:
+            meta = node.get("compactMetadata", {})
+            out.append(
+                Boundary(
+                    trigger=str(meta.get("trigger", "")),
+                    pre_tokens=int(meta.get("preTokens", 0)),
+                    post_tokens=int(meta.get("postTokens", 0)),
+                )
+            )
+        elif text := _text(node):
+            out.append(Said(role=_role(node), text=text))
+        else:
+            out.extend(_calls(node, results))
+    return out
+
+
+def leaf(records: list[dict[str, Any]]) -> str:
+    """Where the thread currently ends, for asking what came after it later."""
+    nodes = [r for r in records if r.get("type") in NODE_TYPES and r.get("uuid")]
+    active = _active_branch(nodes, _sidecar_state(records).get("leafUuid"))
+    return str(active[-1]["uuid"]) if active else ""
+
+
+def _after(nodes: list[dict[str, Any]], since: str) -> list[dict[str, Any]]:
+    for i, node in enumerate(nodes):
+        if node["uuid"] == since:
+            return nodes[i + 1 :]
+    return nodes
+
+
+def _tool_results(nodes: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {
+        block["tool_use_id"]: block
+        for node in nodes
+        for block in _content(node)
+        if block.get("type") == "tool_result" and block.get("tool_use_id")
+    }
+
+
+def _calls(node: dict[str, Any], results: dict[str, dict[str, Any]]) -> Iterator[Ran]:
+    for block in _content(node):
+        if block.get("type") != "tool_use":
+            continue
+        result = results.get(block.get("id", ""), {})
+        yield Ran(
+            tool=str(block.get("name", "")),
+            input=block.get("input") or {},
+            output=_result_text(result.get("content")),
+            is_error=bool(result.get("is_error")),
+        )
+
+
+def _content(node: dict[str, Any]) -> list[dict[str, Any]]:
+    content = node.get("message", {}).get("content")
+    return [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+
+
 def render(records: list[dict[str, Any]], tools: bool, whole: bool) -> Iterator[str]:
-    """The transcript as markdown, read from the file rather than the index.
+    """The transcript as markdown, for a terminal. A formatter over `blocks`.
 
     The index holds no tool output by design, so this is the only way to see
     what was actually run. By default it follows the live thread; `whole`
     includes the branches that were abandoned.
     """
-    nodes = [r for r in records if r.get("type") in NODE_TYPES and r.get("uuid")]
-    if not whole:
-        nodes = _active_branch(nodes, _sidecar_state(records).get("leafUuid"))
-    boundaries = {c.uuid for c in _compactions("", records)}
-
-    for node in nodes:
-        if node["uuid"] in boundaries:
-            yield from _compaction_rule(node)
-        elif text := _text(node):
-            yield f"\n## {_role(node)}\n\n{text}\n"
-        elif tools:
-            yield from _tool_calls(node)
-
-
-def _compaction_rule(node: dict[str, Any]) -> Iterator[str]:
-    meta = node.get("compactMetadata", {})
-    yield f"\n---\n\n*Compacted ({meta.get('trigger')}): "
-    yield f"{meta.get('preTokens', 0):,} → {meta.get('postTokens', 0):,} tokens*\n"
-
-
-def _tool_calls(node: dict[str, Any]) -> Iterator[str]:
-    content = node.get("message", {}).get("content")
-    for block in content if isinstance(content, list) else []:
-        if not isinstance(block, dict):
-            continue
-        if block.get("type") == "tool_use":
-            yield f"\n### {block.get('name')}\n\n```json\n{_json(block.get('input'))}\n```\n"
-        elif block.get("type") == "tool_result":
-            yield f"\n```\n{_result_text(block.get('content'))}\n```\n"
+    for block in blocks(records, whole=whole):
+        match block:
+            case Boundary():
+                yield f"\n---\n\n*Compacted ({block.trigger}): "
+                yield f"{block.pre_tokens:,} → {block.post_tokens:,} tokens*\n"
+            case Said():
+                yield f"\n## {block.role}\n\n{block.text}\n"
+            case Ran() if tools:
+                yield f"\n### {block.tool}\n\n```json\n{_json(block.input)}\n```\n"
+                yield f"\n```\n{block.output}\n```\n"
+            case _:
+                pass
 
 
 def _result_text(content: Any) -> str:

@@ -90,6 +90,43 @@ class Compaction:
     preserved_count: int
 
 
+@dataclass(frozen=True, slots=True)
+class Said:
+    """Prose, by one side or the other."""
+
+    role: str
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class Ran:
+    """A tool call and what came back from it, kept together.
+
+    They arrive as separate records — the call on one, the result on the next —
+    and every reader wants them as one thing.
+    """
+
+    tool: str
+    input: dict[str, object]
+    output: str = ""
+    is_error: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Boundary:
+    """Where a compaction cut the thread."""
+
+    trigger: str
+    pre_tokens: int
+    post_tokens: int
+
+
+# A conversation, in the order it happened, in the only shape a reader needs.
+# One parser produces these; each place that shows a conversation is a
+# formatter over them and nothing more.
+Block = Said | Ran | Boundary
+
+
 @dataclass(slots=True)
 class Delta:
     """Everything one transcript file contributed to the index."""

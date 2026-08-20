@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Protocol
 
-from agent_sessions.models import Delta, Discovered, Running
+from agent_sessions.models import Block, Delta, Discovered, Running
 
 
 class Source(Protocol):
@@ -46,6 +46,19 @@ class Source(Protocol):
         runs here — this is a command line for a pane on this machine — but the
         conversation is then had wherever the agent puts it.
         """
+        ...
+
+    def blocks(self, path: Path, since: str = "") -> list[Block]:
+        """The conversation as blocks, which is what every reader wants.
+
+        One parser per agent, and every place that shows a conversation is a
+        formatter over its output. `since` gives what came after a point, which
+        is how a turn just run is told from the rest of the session.
+        """
+        ...
+
+    def leaf(self, path: Path) -> str:
+        """Where the thread ends now, to ask what came after it later."""
         ...
 
     def turn_command(self, native_id: str, allowed: list[str]) -> list[str]:

@@ -13,11 +13,13 @@ sees this work exactly as it sees the rest. Nothing here is a separate history.
 
 import subprocess
 import time
+from pathlib import Path
 from typing import Any, Protocol
 
 import orjson
 
 from agent_sessions import attending, channel, comment, index, query
+from agent_sessions.models import Block, Said
 
 # What a prompt from the park may do. A bare `Bash` is every command there is,
 # so it is not on the list; the commands that are, are named. Editing is here
@@ -97,8 +99,8 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
         # Held for the length of the turn, so a resume from the terminal is
         # refused rather than opening a second agent on the same transcript.
         with attending.holding(session["native_id"]):
-            events = run_turn(session, prompt.body, ALLOWED)
-        control.post(issue.number, comment.render(events))
+            blocks, summary = run_turn(session, prompt.body, ALLOWED)
+        control.post(issue.number, comment.render(blocks, summary))
         answered += 1
     _restate(control, issue, session)
     return answered
@@ -126,13 +128,19 @@ def lookup(conn: Any, session_id: str) -> dict[str, Any] | None:
     return query.get(conn, session_id)
 
 
-def run_turn(session: dict[str, Any], prompt: str, allowed: list[str]) -> list[dict[str, Any]]:
+def run_turn(
+    session: dict[str, Any], prompt: str, allowed: list[str]
+) -> tuple[list[Block], dict[str, Any]]:
     """One headless turn, in the directory the session was had in.
 
-    It appends to the session's own transcript, so this is the same session
-    continuing and not a copy of it.
+    A turn appends to the session's own transcript, so what it said is read
+    back from there rather than parsed off stdout: one parser, and the comment
+    cannot say something different from what `cat` and the pages say. Only what
+    the turn cost comes off stdout, because the transcript does not hold it.
     """
     source = index.SOURCES[session["agent"]]
+    path = Path(session["path"])
+    before = source.leaf(path)
     done = subprocess.run(
         source.turn_command(session["native_id"], allowed),
         cwd=session["cwd"],
@@ -142,15 +150,19 @@ def run_turn(session: dict[str, Any], prompt: str, allowed: list[str]) -> list[d
         timeout=TIMEOUT,
         check=False,
     )
-    return _events(done.stdout) or [_failed(done)]
+    blocks = source.blocks(path, since=before)
+    return (blocks or [_failed(done)]), _summary(done.stdout)
 
 
-def _events(stdout: str) -> list[dict[str, Any]]:
-    return [orjson.loads(line) for line in stdout.splitlines() if line.startswith("{")]
+def _summary(stdout: str) -> dict[str, Any]:
+    text = stdout.strip()
+    return orjson.loads(text) if text.startswith("{") else {}
 
 
-def _failed(done: subprocess.CompletedProcess[str]) -> dict[str, Any]:
-    """Nothing came back. Say so in the thread rather than nowhere."""
+def _failed(done: subprocess.CompletedProcess[str]) -> Said:
+    """The transcript grew by nothing. Say so in the thread rather than nowhere."""
     detail = (done.stderr or "no output").strip()[:2_000]
-    text = f"The turn produced nothing (exit {done.returncode}).\n\n```\n{detail}\n```"
-    return {"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}}
+    return Said(
+        role="assistant",
+        text=f"The turn added nothing (exit {done.returncode}).\n\n```\n{detail}\n```",
+    )
