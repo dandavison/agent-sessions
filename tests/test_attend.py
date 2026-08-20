@@ -317,3 +317,37 @@ def test_it_says_how_many_prompts_are_waiting(turns: list[dict], found, capsys) 
     c = FakeChannel([issue()], {4: [prompt(11, "first"), prompt(12, "second")]})
     attend.once(c, conn=None)
     assert "2 waiting" in capsys.readouterr().err
+
+
+# --- a turn cut off part way is not finished ---------------------------------
+
+
+def test_a_prompt_whose_turn_never_finished_is_picked_up_again(turns: list[dict], found) -> None:
+    """Killing the loop mid-turn dropped the prompt for good.
+
+    The eyes go on before the turn runs, so they say `started`, not `answered`.
+    With them as the record, a turn interrupted by a restart was never retried
+    and never replied to — the work was in the transcript and nowhere else.
+    """
+    interrupted = prompt(11, "the one that was cut off", taken=True)
+    c = FakeChannel([issue()], {4: [interrupted]})
+    attend.once(c, conn=None)
+    assert turns[0]["prompt"] == "the one that was cut off"
+
+
+def test_a_prompt_that_was_answered_is_left_alone(turns: list[dict], found) -> None:
+    answered = prompt(11, "already done", taken=True)
+    reply = channel.Comment(id=12, body=f"{channel.MARKER}\nDone.", author="dandavison-agent[bot]")
+    c = FakeChannel([issue()], {4: [answered, reply]})
+    attend.once(c, conn=None)
+    assert turns == []
+
+
+def test_an_older_prompts_answer_does_not_count_for_a_newer_one(turns: list[dict], found) -> None:
+    """Answered means answered next, not answered at some point afterwards."""
+    first = prompt(11, "first", taken=True)
+    reply = channel.Comment(id=12, body=f"{channel.MARKER}\nDone.", author="agent[bot]")
+    second = prompt(13, "second", taken=True)
+    c = FakeChannel([issue()], {4: [first, reply, second]})
+    attend.once(c, conn=None)
+    assert [t["prompt"] for t in turns] == ["second"]
