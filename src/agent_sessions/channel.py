@@ -9,19 +9,30 @@ request that has not changed returns 304 and costs nothing against the rate
 limit, so the interval is a free choice rather than a budget: the ETag is not
 an optimisation to add later, it is what makes the design work at all.
 
-The comments are posted with my own token, so the author never distinguishes
-mine from its own. A marker in the body does, and the eyes on a comment record
-that it has been taken up. Both live on GitHub deliberately: the index is a
+Who posts matters more than it looks. With my own token the author of a reply
+is me, and GitHub does not notify you about your own activity — so the answer
+landing was silent, and reloading the page was the only way to find out. A
+GitHub App posts as `agent-work[bot]`, which is someone else, so the ordinary
+notification fires. Configure `AGENT_WORK_APP_ID` and `AGENT_WORK_APP_KEY` and
+it is used; otherwise the token is whatever `gh` is signed in as.
+
+Telling my comments from its own then has two answers, and needs both: the
+author settles it for anything the app posted, and the marker still settles it
+for everything posted back when it was me. The eyes on a comment record that it
+has been taken up. All of it lives on GitHub deliberately: the index is a
 derived cache that is safe to delete, and losing it must not make the loop read
 its own output back as prompts and never stop.
 """
 
 import os
 import subprocess
+import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import httpx
+import jwt
 
 from agent_sessions import comment, log
 
@@ -36,10 +47,30 @@ MARKER = "<!-- agent-work:turn -->"
 # shows something within seconds of asking for it.
 SEEN = "eyes"
 
+# The app, when there is one. Named rather than discovered, so that running
+# without it is a choice and not an accident.
+APP_ID = "AGENT_WORK_APP_ID"
+APP_KEY = "AGENT_WORK_APP_KEY"
+
+# GitHub gives an installation token an hour; minted per call it would be two
+# extra requests every two seconds.
+_minted: tuple[str, float] = ("", 0.0)
+
+
+_ACCEPT = "application/vnd.github+json"
+
 
 class NoToken(Exception):
-    def __init__(self) -> None:
-        super().__init__("No GitHub token. Run `gh auth login`.")
+    def __init__(self, why: str = "No GitHub token. Run `gh auth login`.") -> None:
+        super().__init__(why)
+
+    @classmethod
+    def no_key(cls, path: str) -> "NoToken":
+        return cls(f"Cannot read the app key at {path}. ${APP_KEY} names it.")
+
+    @classmethod
+    def not_installed(cls) -> "NoToken":
+        return cls(f"The app in ${APP_ID} is not installed on any account.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +82,13 @@ class Comment:
 
     @property
     def is_ours(self) -> bool:
-        return MARKER in self.body
+        """Whether the loop wrote this, by either of the two things that say so.
+
+        The author, for anything the app posted. The marker, for the comments
+        posted back when this ran as me — without it, a repo full of those
+        becomes a queue of prompts the moment the app is turned on.
+        """
+        return self.author.endswith("[bot]") or MARKER in self.body
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,13 +195,61 @@ def _comment(raw: dict[str, Any]) -> Comment:
 
 def _headers() -> dict[str, str]:
     return {
-        "Authorization": f"Bearer {_token()}",
+        "Authorization": f"Bearer {token()}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
 
 
-def _token() -> str:
+def token() -> str:
+    """The app's token if one is configured, and otherwise mine.
+
+    Configured by name rather than discovered, so that running as myself — and
+    getting no notifications — is a choice rather than something that happened.
+    """
+    app_id, key_path = os.environ.get(APP_ID), os.environ.get(APP_KEY)
+    return _installation_token(app_id, key_path) if app_id and key_path else _gh_token()
+
+
+def _installation_token(app_id: str, key_path: str) -> str:
+    global _minted
+    held, expires = _minted
+    if held and time.time() < expires:
+        return held
+    key = _read_key(key_path)
+    client = _new_client()
+    signed = {"Authorization": f"Bearer {_jwt(app_id, key)}", "Accept": _ACCEPT}
+    installations = client.get("/app/installations", headers=signed)
+    installations.raise_for_status()
+    found = installations.json()
+    if not found:
+        raise NoToken.not_installed()
+    minted = client.post(f"/app/installations/{found[0]['id']}/access_tokens", headers=signed)
+    minted.raise_for_status()
+    # Well inside the hour GitHub gives it, so a turn never runs out mid-flight.
+    _minted = (minted.json()["token"], time.time() + 45 * 60)
+    log.detail(f"minted an installation token for app {app_id}")
+    return _minted[0]
+
+
+def _jwt(app_id: str, key: str) -> str:
+    """Signed with the app's own key, and short-lived: GitHub allows ten minutes."""
+    now = int(time.time())
+    return jwt.encode({"iat": now - 60, "exp": now + 9 * 60, "iss": app_id}, key, algorithm="RS256")
+
+
+def _read_key(key_path: str) -> str:
+    try:
+        return Path(key_path).expanduser().read_text()
+    except OSError as e:
+        raise NoToken.no_key(key_path) from e
+
+
+def _new_client() -> httpx.Client:
+    return httpx.Client(base_url=API, timeout=30.0)
+
+
+def _gh_token() -> str:
     """Whatever `gh` is already signed in as. One place to be authenticated."""
     try:
         found = subprocess.run(

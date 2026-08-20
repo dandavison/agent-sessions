@@ -16,6 +16,12 @@ import pytest
 from agent_sessions import channel
 
 
+@pytest.fixture(autouse=True)
+def _unminted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The installation token is cached in the module, so tests would share one."""
+    monkeypatch.setattr(channel, "_minted", ("", 0.0))
+
+
 def responder(routes: dict[str, object], seen: list[httpx.Request] | None = None):
     """A GitHub that answers from a dict, and records what it was asked."""
 
