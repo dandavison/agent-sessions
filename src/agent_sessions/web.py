@@ -584,8 +584,18 @@ class _Handler(BaseHTTPRequestHandler):
         print(f"{self.command} {self.path}", file=sys.stderr)
 
 
+def listener(host: str = HOST, port: int = PORT) -> ThreadingHTTPServer:
+    """Bind the socket, and fail here if it cannot be had.
+
+    Separate from serving it because the caller may want the failure on its own
+    thread rather than on whichever thread ends up doing the serving: a
+    traceback out of a daemon thread is not something a process notices.
+    """
+    return ThreadingHTTPServer((host, port), _Handler)
+
+
 def serve(host: str = HOST, port: int = PORT) -> None:
-    with ThreadingHTTPServer((host, port), _Handler) as server:
+    with listener(host, port) as server:
         server.serve_forever()
 
 

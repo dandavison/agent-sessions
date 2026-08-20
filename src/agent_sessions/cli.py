@@ -4,11 +4,11 @@ import sqlite3
 import sys
 import time
 import webbrowser
-from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import asdict
 from pathlib import Path
 from threading import Thread
+from typing import Any
 
 import click
 import segno
@@ -500,21 +500,37 @@ def serve(port: int, host: str, lan: bool, attending_too: bool, open_browser: bo
     print(f"agent-sessions at {local}", file=sys.stderr)
     if lan:
         _announce(web.reachable(port))
+    server = _bound(host, port)
     if attending_too:
-        _attend_beside(web.serve, host, port)
+        _attend_beside(server)
         return
     if open_browser:
         webbrowser.open(local)
-    with suppress(KeyboardInterrupt):
-        web.serve(host, port)
+    with suppress(KeyboardInterrupt), server:
+        server.serve_forever()
 
 
-def _attend_beside(serve_forever: Callable[[str, int], None], host: str, port: int) -> None:
-    """The pages in this thread, the channel in another. Both stop on one interrupt."""
+def _bound(host: str, port: int) -> Any:
+    """The socket, before anything else is started. Say who has it if it is taken."""
+    try:
+        return web.listener(host, port)
+    except OSError as e:
+        raise click.UsageError(
+            f"cannot listen on {host}:{port} ({e.strerror})."
+            " Another agent-sessions serve is the usual reason."
+        ) from e
+
+
+def _attend_beside(server: Any) -> None:
+    """The channel in this thread, the pages in another. Both stop on one interrupt.
+
+    This way round because a failure attending is one I should see, and the
+    socket is already bound by the time the thread gets it.
+    """
     control = channel.Channel()
     print(f"attending {control.repo}, every {attend.INTERVAL:g}s", file=sys.stderr)
-    Thread(target=serve_forever, args=(host, port), daemon=True).start()
-    with suppress(KeyboardInterrupt):
+    Thread(target=server.serve_forever, daemon=True).start()
+    with suppress(KeyboardInterrupt), server:
         attend.loop(control, db.connect())
 
 

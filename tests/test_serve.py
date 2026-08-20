@@ -13,11 +13,32 @@ import pytest
 from agent_sessions import cli, web
 
 
+class FakeServer:
+    """A bound socket that serves nothing, so a test never blocks on one."""
+
+    def __init__(self) -> None:
+        self.served = 0
+
+    def serve_forever(self) -> None:
+        self.served += 1
+
+    def __enter__(self) -> "FakeServer":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        pass
+
+
 @pytest.fixture
 def served(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, int]]:
     """What the socket was asked to bind, without binding it."""
     bound: list[tuple[str, int]] = []
-    monkeypatch.setattr(web, "serve", lambda host, port: bound.append((host, port)))
+
+    def listener(host: str, port: int) -> FakeServer:
+        bound.append((host, port))
+        return FakeServer()
+
+    monkeypatch.setattr(web, "listener", listener)
     return bound
 
 
