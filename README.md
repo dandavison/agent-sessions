@@ -63,7 +63,9 @@ the answer lands, and an app to read it in. Dictate into the comment box and
 you never touch a keyboard.
 
 A turn appends to the session's own transcript, so `sync`, `search`, `show` and
-`cat` see this work as they see the rest. There is no second history.
+`cat` see this work as they see the rest. There is no second history. A session
+open in a pane at home is taken over: two agents on one transcript fork it and
+then fight over which branch is live, and I am not at that keyboard.
 
 `<!-- agent-work:turn -->` marks what the loop wrote, and 👀 marks a prompt it
 has taken up. Both live on GitHub, not in the index: comments are posted with

@@ -13,10 +13,16 @@ sees this work exactly as it sees the rest. Nothing here is a separate history.
 A turn runs under my own settings, so a prompt left here is allowed whatever a
 prompt typed at the keyboard is allowed. Nothing stands between a comment on
 the issue and this machine except who can reach the repo.
+
+A session open in a pane at home is taken over rather than refused. I am not at
+that keyboard, and a refusal is not a tool working.
 """
 
+import os
+import signal
 import subprocess
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -26,6 +32,9 @@ from agent_sessions import attending, channel, comment, index, query
 from agent_sessions.models import Block, Said
 
 INTERVAL = 5.0
+
+# Long enough for an agent to put its affairs in order on SIGTERM.
+TAKEOVER_WAIT = 10.0
 
 # Long enough for a real turn, short enough that a wedged one is noticed.
 TIMEOUT = 1800.0
@@ -82,30 +91,51 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
         # The eyes first: a turn takes minutes, and without them it looks from
         # the park like the prompt fell on the floor.
         control.take_up(prompt.id)
-        if refusal := _refusal(session, issue.session_id):
-            control.post(issue.number, refusal)
+        if session is None:
+            control.post(
+                issue.number,
+                f"No session matches `{issue.session_id}`. Fix the table in the issue body.",
+            )
             continue
-        assert session is not None
+        displaced = _clear_the_way(session)
         # Held for the length of the turn, so a resume from the terminal is
         # refused rather than opening a second agent on the same transcript.
         with attending.holding(session["native_id"]):
             blocks, summary = run_turn(session, prompt.body)
-        control.post(issue.number, comment.render(blocks, summary))
+        control.post(issue.number, displaced + comment.render(blocks, summary))
         answered += 1
     _restate(control, issue, session)
     return answered
 
 
-def _refusal(session: dict[str, Any] | None, session_id: str) -> str:
-    if session is None:
-        return f"No session matches `{session_id}`. Fix the table in the issue body."
+def _clear_the_way(session: dict[str, Any]) -> str:
+    """Take the session off whatever else holds it, and say so.
+
+    Two agents on one transcript fork it and then fight over the `last-prompt`
+    record that says which branch is live. One of them has to go, and it is not
+    the one I am talking to: I am not at that keyboard, and the pane holds
+    nothing the transcript does not.
+    """
     running = index.SOURCES[session["agent"]].live().get(session["native_id"])
-    if running:
-        return (
-            f"`{session_id}` is running in a terminal ({running.status}), so I have left it"
-            " alone: two agents on one transcript would corrupt it."
-        )
-    return ""
+    if not running:
+        return ""
+    take_over(running.pid)
+    return (
+        f"<sub>Taken over from a terminal ({running.status});"
+        " resume it to pick it back up.</sub>\n\n"
+    )
+
+
+def take_over(pid: int) -> None:
+    """Stop the process holding a session, and wait until it has actually gone."""
+    with suppress(ProcessLookupError):
+        os.kill(pid, signal.SIGTERM)
+    for _ in range(int(TAKEOVER_WAIT / 0.1)):
+        try:
+            os.kill(pid, 0)
+        except (ProcessLookupError, PermissionError):
+            return
+        time.sleep(0.1)
 
 
 def _restate(control: Control, issue: channel.Issue, session: dict[str, Any] | None) -> None:
