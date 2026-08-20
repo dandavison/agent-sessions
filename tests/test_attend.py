@@ -21,6 +21,7 @@ class FakeChannel:
     issues_: list[channel.Issue]
     comments_: dict[int, list[channel.Comment]] = field(default_factory=dict)
     posted: list[tuple[int, str]] = field(default_factory=list)
+    edited: list[tuple[int, str]] = field(default_factory=list)
     taken: list[int] = field(default_factory=list)
     bodies: dict[int, str] = field(default_factory=dict)
     titles: list[str] = field(default_factory=list)
@@ -37,8 +38,12 @@ class FakeChannel:
     def comments(self, number: int) -> list[channel.Comment]:
         return self.comments_.get(number, [])
 
-    def post(self, number: int, body: str) -> None:
+    def post(self, number: int, body: str) -> int:
         self.posted.append((number, body))
+        return 900 + len(self.posted)
+
+    def edit(self, comment_id: int, body: str) -> None:
+        self.edited.append((comment_id, body))
 
     def take_up(self, comment_id: int) -> None:
         self.taken.append(comment_id)
@@ -356,3 +361,29 @@ def test_an_older_prompts_answer_does_not_count_for_a_newer_one(turns: list[dict
     c = FakeChannel([issue()], {4: [first, reply, second]})
     attend.once(c, conn=None)
     assert [t["prompt"] for t in turns] == ["second"]
+
+
+# --- progress where I am actually looking ------------------------------------
+
+
+def test_a_comment_appears_before_the_turn_starts(turns: list[dict], found) -> None:
+    """Posted from the park, the thread should show something before the answer."""
+    c = FakeChannel([issue()], {4: [prompt()]})
+    attend.once(c, conn=None)
+    assert c.posted[0][1].startswith(channel.RUNNING)
+
+
+def test_the_answer_replaces_that_comment_rather_than_adding_one(turns: list[dict], found) -> None:
+    c = FakeChannel([issue()], {4: [prompt()]})
+    attend.once(c, conn=None)
+    assert len(c.posted) == 1
+    assert "Done." in c.edited[-1][1]
+    assert channel.RUNNING not in c.edited[-1][1]
+
+
+def test_a_stale_progress_comment_does_not_count_as_an_answer(turns: list[dict], found) -> None:
+    """What a killed turn leaves: the prompt is still unanswered and gets retried."""
+    stale = channel.Comment(id=13, body=f"{channel.RUNNING}\nWorking…", author="a[bot]")
+    c = FakeChannel([issue()], {4: [prompt(11, "cut off", taken=True), stale]})
+    attend.once(c, conn=None)
+    assert turns[0]["prompt"] == "cut off"

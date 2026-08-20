@@ -280,3 +280,27 @@ def test_without_the_app_it_is_still_whatever_gh_is_signed_in_as(monkeypatch) ->
     monkeypatch.delenv("AGENT_WORK_APP_ID", raising=False)
     monkeypatch.setattr(channel, "_gh_token", lambda: "gho_mine")
     assert channel.token() == "gho_mine"
+
+
+# --- one comment that becomes the answer --------------------------------------
+
+
+def test_posting_says_which_comment_it_made() -> None:
+    """Progress is an edit to that comment, so its id has to come back."""
+    c = channel_over({"POST /repos/dandavison/agent-work/issues/4/comments": {"id": 13}})
+    assert c.post(4, "Working…") == 13
+
+
+def test_a_comment_can_be_rewritten() -> None:
+    seen: list[httpx.Request] = []
+    c = channel_over({"PATCH /repos/dandavison/agent-work/issues/comments/13": {"id": 13}}, seen)
+    c.edit(13, "Done.")
+    assert seen[-1].method == "PATCH"
+    assert b"Done." in seen[-1].content
+
+
+def test_a_progress_comment_is_ours_but_is_not_an_answer() -> None:
+    """Left behind by a turn that was killed, it must not look like a reply."""
+    running = channel.Comment(id=13, body=f"{channel.RUNNING}\nWorking…", author="a[bot]")
+    assert running.is_ours
+    assert running.is_progress
