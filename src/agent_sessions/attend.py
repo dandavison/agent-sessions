@@ -108,7 +108,7 @@ def once(control: Control, conn: Any) -> int:
 
 
 def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
-    waiting = [c for c in control.comments(issue.number) if not c.is_ours and not c.taken_up]
+    waiting = unanswered(control.comments(issue.number))
     if not waiting:
         return 0
     log.say(f"#{issue.number} {len(waiting)} waiting")
@@ -144,6 +144,24 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
         answered += 1
     _restate(control, issue, session)
     return answered
+
+
+def unanswered(comments: list[channel.Comment]) -> list[channel.Comment]:
+    """My comments that the loop has not replied to yet.
+
+    The eyes cannot decide this: they go on before the turn starts, so they say
+    started, not answered. A restart mid-turn left a prompt with eyes, no reply,
+    and no prospect of either. What settles it is whether a reply follows — the
+    very next comment, not merely some later one, or an answered prompt would
+    look unanswered again the moment a newer one arrived.
+    """
+    out = []
+    for i, mine in enumerate(comments):
+        if mine.is_ours:
+            continue
+        if not next((c.is_ours for c in comments[i + 1 :]), False):
+            out.append(mine)
+    return out
 
 
 def _clear_the_way(session: dict[str, Any]) -> str:

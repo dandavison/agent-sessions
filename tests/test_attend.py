@@ -116,10 +116,15 @@ def test_what_it_wrote_is_not_read_back_as_a_prompt(turns: list[dict], found) ->
     assert turns == []
 
 
-def test_a_prompt_already_taken_up_is_left_alone(turns: list[dict], found) -> None:
+def test_the_eyes_alone_do_not_mean_a_prompt_is_done(turns: list[dict], found) -> None:
+    """This asserted the opposite, and the opposite was the bug.
+
+    Eyes with no reply is what a turn killed part way leaves behind, and
+    treating it as done is what dropped that work. A reply is what settles it.
+    """
     c = FakeChannel([issue()], {4: [prompt(taken=True)]})
     attend.once(c, conn=None)
-    assert turns == []
+    assert turns[0]["prompt"] == "try it with -x"
 
 
 def test_every_prompt_waiting_is_answered(turns: list[dict], found) -> None:
