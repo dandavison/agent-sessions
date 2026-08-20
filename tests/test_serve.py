@@ -78,3 +78,23 @@ def test_asking_it_to_attend_attends_beside_the_server(served, capsys, monkeypat
     monkeypatch.setattr(cli.channel, "Channel", lambda: SimpleNamespace(repo="dan/agent-work"))
     cli.run(["serve", "--attend", "--no-open"])
     assert attended
+
+
+def test_a_port_already_taken_is_an_error_not_a_dead_thread(monkeypatch, capsys) -> None:
+    """Serving in a thread hid this: attend ran on, and the pages never came up.
+
+    A traceback from a daemon thread is not a failure the process notices, so
+    the socket is bound before the thread starts and the error is the command's.
+    """
+
+    def taken(host: str, port: int):
+        raise OSError(48, "Address already in use")
+
+    monkeypatch.setattr(web, "listener", taken)
+    monkeypatch.setattr(cli.channel, "Channel", lambda: SimpleNamespace(repo="dan/agent-work"))
+    attended: list[object] = []
+    monkeypatch.setattr(cli.attend, "loop", lambda *a, **k: attended.append(a))
+
+    assert cli.run(["serve", "--attend", "--no-open"]) == cli.EXIT_USAGE
+    assert "7118" in capsys.readouterr().err
+    assert attended == []
