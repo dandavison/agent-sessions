@@ -4,9 +4,11 @@ import sqlite3
 import sys
 import time
 import webbrowser
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import asdict
 from pathlib import Path
+from threading import Thread
 
 import click
 import segno
@@ -463,7 +465,8 @@ def attend_channel(interval: float, single: bool) -> None:
     conn = db.connect()
     control = channel.Channel()
     print(f"attending {control.repo}, every {interval:g}s", file=sys.stderr)
-    print(f"tools: {', '.join(attend.ALLOWED)}", file=sys.stderr)
+    print(f"by default: {', '.join(attend.READING.allowed)}", file=sys.stderr)
+    print(f"or ask in the comment: {', '.join(sorted(attend.DIRECTIVES))}", file=sys.stderr)
     if single:
         attend.once(control, conn)
         return
@@ -475,8 +478,9 @@ def attend_channel(interval: float, single: bool) -> None:
 @click.option("--port", default=web.PORT, show_default=True, help="Which port to listen on.")
 @click.option("--host", default=web.HOST, show_default=True, help="Which address to bind.")
 @click.option("--lan", is_flag=True, help="Serve to the rest of the network, for a phone.")
+@click.option("--attend", "attending_too", is_flag=True, help="Answer the control channel too.")
 @click.option("--open/--no-open", "open_browser", default=True, help="Open a browser at it.")
-def serve(port: int, host: str, lan: bool, open_browser: bool) -> None:
+def serve(port: int, host: str, lan: bool, attending_too: bool, open_browser: bool) -> None:
     """Serve the index in a browser, where a link is enough to resume.
 
     `/resume/<id>` resumes on a GET, so that URL is clickable from anywhere a URL
@@ -487,6 +491,10 @@ def serve(port: int, host: str, lan: bool, open_browser: bool) -> None:
     it, and prints a QR code so nobody has to read an address out. Everything
     on that network can then reach every conversation you have had, and resume
     one, so it is asked for rather than assumed.
+
+    `--attend` answers the control channel alongside, so leaving this running
+    is the whole of the setup. Serving is reading and attending runs an agent,
+    which is why one does not imply the other.
     """
     if lan:
         host = web.EVERY_INTERFACE
@@ -494,10 +502,22 @@ def serve(port: int, host: str, lan: bool, open_browser: bool) -> None:
     print(f"agent-sessions at {local}", file=sys.stderr)
     if lan:
         _announce(web.reachable(port))
+    if attending_too:
+        _attend_beside(web.serve, host, port)
+        return
     if open_browser:
         webbrowser.open(local)
     with suppress(KeyboardInterrupt):
         web.serve(host, port)
+
+
+def _attend_beside(serve_forever: Callable[[str, int], None], host: str, port: int) -> None:
+    """The pages in this thread, the channel in another. Both stop on one interrupt."""
+    control = channel.Channel()
+    print(f"attending {control.repo}, every {attend.INTERVAL:g}s", file=sys.stderr)
+    Thread(target=serve_forever, args=(host, port), daemon=True).start()
+    with suppress(KeyboardInterrupt):
+        attend.loop(control, db.connect())
 
 
 def _announce(urls: list[str]) -> None:

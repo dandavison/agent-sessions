@@ -6,6 +6,8 @@ itself and puts them on the terminal as a QR code, which is the one way of
 handing a URL to a phone that costs nothing to do again when the address moves.
 """
 
+from types import SimpleNamespace
+
 import pytest
 
 from agent_sessions import cli, web
@@ -56,3 +58,23 @@ def test_the_addresses_offered_are_ones_something_else_could_reach() -> None:
     assert urls
     assert all(url.startswith("http://") and url.endswith(":7118/") for url in urls)
     assert not [url for url in urls if "127.0.0.1" in url or "localhost" in url]
+
+
+# --- and attending the control channel while it does ------------------------
+
+
+def test_serving_does_not_attend_unless_asked(served, capsys, monkeypatch) -> None:
+    """Serving is reading. Answering prompts runs an agent, which is not the same."""
+    attended: list[object] = []
+    monkeypatch.setattr(cli.attend, "loop", lambda *a, **k: attended.append(a))
+    cli.run(["serve", "--no-open"])
+    assert attended == []
+
+
+def test_asking_it_to_attend_attends_beside_the_server(served, capsys, monkeypatch) -> None:
+    """One process to leave running, rather than two terminals to remember."""
+    attended: list[object] = []
+    monkeypatch.setattr(cli.attend, "loop", lambda *a, **k: attended.append(a))
+    monkeypatch.setattr(cli.channel, "Channel", lambda: SimpleNamespace(repo="dan/agent-work"))
+    cli.run(["serve", "--attend", "--no-open"])
+    assert attended

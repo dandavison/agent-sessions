@@ -13,6 +13,7 @@ sees this work exactly as it sees the rest. Nothing here is a separate history.
 
 import subprocess
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -21,12 +22,9 @@ import orjson
 from agent_sessions import attending, channel, comment, index, query
 from agent_sessions.models import Block, Said
 
-# What a prompt from the park may do. A bare `Bash` is every command there is,
-# so it is not on the list; the commands that are, are named. Editing is here
-# because reading alone is not working, and a worktree with git in it is the
-# undo. Anything else fails and says so, which is the whole of the policy until
-# the approval loop lands.
-ALLOWED = [
+# A bare `Bash` is every command there is, so it is not on any list; the
+# commands that are, are named.
+_READING = (
     "Read",
     "Grep",
     "Glob",
@@ -34,9 +32,6 @@ ALLOWED = [
     "TodoWrite",
     "WebFetch",
     "WebSearch",
-    "Edit",
-    "Write",
-    "MultiEdit",
     "Bash(git status:*)",
     "Bash(git diff:*)",
     "Bash(git log:*)",
@@ -48,7 +43,28 @@ ALLOWED = [
     "Bash(uv run pytest:*)",
     "Bash(uv run ruff:*)",
     "Bash(uv run ty:*)",
-]
+)
+
+_WRITING = (*_READING, "Edit", "Write", "MultiEdit")
+
+
+@dataclass(frozen=True, slots=True)
+class Permission:
+    """What one turn may do. Settled before it starts, because nobody is there."""
+
+    label: str
+    allowed: tuple[str, ...] = ()
+    bypass: bool = False
+
+
+READING = Permission("reading", _READING)
+WRITING = Permission("writing", _WRITING)
+ANYTHING = Permission("anything", bypass=True)
+
+# Asked for in the comment that wants it, so it is scoped to that turn and
+# visible in the thread, rather than a setting turned on once and forgotten
+# about while I am not at the keyboard.
+DIRECTIVES = {"/write": WRITING, "/anything": ANYTHING}
 
 INTERVAL = 5.0
 
@@ -111,14 +127,32 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
             control.post(issue.number, refusal)
             continue
         assert session is not None
+        permission, text = asked(prompt.body)
         # Held for the length of the turn, so a resume from the terminal is
         # refused rather than opening a second agent on the same transcript.
         with attending.holding(session["native_id"]):
-            blocks, summary = run_turn(session, prompt.body, ALLOWED)
-        control.post(issue.number, comment.render(blocks, summary))
+            blocks, summary = run_turn(session, text, permission)
+        control.post(issue.number, comment.render(blocks, summary, _note(permission)))
         answered += 1
     _restate(control, issue, session)
     return answered
+
+
+def asked(body: str) -> tuple[Permission, str]:
+    """What this prompt may do, and the prompt with that bit taken off.
+
+    A directive says how to run the turn, not what the turn is about, so it
+    does not reach the agent.
+    """
+    head, _, rest = body.strip().partition(" ")
+    if permission := DIRECTIVES.get(head):
+        return permission, rest.strip()
+    return READING, body.strip()
+
+
+def _note(permission: Permission) -> str:
+    """Only a departure from the default is worth saying; the default is the norm."""
+    return f"asked for: {permission.label}" if permission is not READING else ""
 
 
 def _refusal(session: dict[str, Any] | None, session_id: str) -> str:
@@ -144,7 +178,7 @@ def lookup(conn: Any, session_id: str) -> dict[str, Any] | None:
 
 
 def run_turn(
-    session: dict[str, Any], prompt: str, allowed: list[str]
+    session: dict[str, Any], prompt: str, permission: Permission
 ) -> tuple[list[Block], dict[str, Any]]:
     """One headless turn, in the directory the session was had in.
 
@@ -157,7 +191,7 @@ def run_turn(
     path = Path(session["path"])
     before = source.leaf(path)
     done = subprocess.run(
-        source.turn_command(session["native_id"], allowed),
+        source.turn_command(session["native_id"], permission.allowed, permission.bypass),
         cwd=session["cwd"],
         input=prompt,
         capture_output=True,

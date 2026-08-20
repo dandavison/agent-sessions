@@ -77,7 +77,7 @@ LANGUAGES = {
 PATH_KEYS = ("file_path", "path", "notebook_path")
 
 
-def render(blocks: list[Block], summary: dict[str, Any] | None = None) -> str:
+def render(blocks: list[Block], summary: dict[str, Any] | None = None, note: str = "") -> str:
     """A turn as the comment to post for it: a formatter over the one parser.
 
     The same blocks the terminal and the pages are shown, so a conversation
@@ -101,7 +101,7 @@ def render(blocks: list[Block], summary: dict[str, Any] | None = None) -> str:
     # Said first, run second, each in the order it happened. A turn answers
     # last, and a comment opens at the top: posted chronologically, the answer
     # sits under every fold and has to be scrolled to on a phone.
-    parts = [*said, *ran, _footer(summary)]
+    parts = [*said, *ran, _footer(summary, note)]
     return _fit(redact("\n\n".join(p for p in parts if p)))
 
 
@@ -187,13 +187,18 @@ def _clip(text: str, limit: int) -> str:
     return f"{text[:limit]}\n\n… truncated, {len(text) - limit:,} more characters"
 
 
-def _footer(summary: dict[str, Any] | None) -> str:
-    """What the turn cost, which is the one thing the transcript does not hold."""
-    if not summary:
-        return ""
+def _footer(summary: dict[str, Any] | None, note: str = "") -> str:
+    """What the turn cost, and anything unusual about how it was allowed to run.
+
+    The cost is the one thing the transcript does not hold; the note is how a
+    turn that was allowed more than the default says so, months later.
+    """
+    summary = summary or {}
     cost = summary.get("total_cost_usd")
     turns = summary.get("num_turns")
-    bits = [b for b in (f"{turns} steps" if turns else "", f"${cost:.2f}" if cost else "") if b]
+    bits = [
+        b for b in (note, f"{turns} steps" if turns else "", f"${cost:.2f}" if cost else "") if b
+    ]
     return f"<sub>{' · '.join(bits)}</sub>" if bits else ""
 
 

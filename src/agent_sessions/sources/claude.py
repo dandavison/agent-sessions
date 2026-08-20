@@ -87,19 +87,15 @@ class ClaudeSource:
             + (" --remote-control" if remote else "")
         )
 
-    def turn_command(self, native_id: str, allowed: list[str]) -> list[str]:
-        return [
-            "claude",
-            "-p",
-            "--resume",
-            native_id,
-            # Not stream-json: what was said is read back off the transcript,
-            # so all that is wanted here is the closing summary.
-            "--output-format",
-            "json",
-            "--allowedTools",
-            *allowed,
-        ]
+    def turn_command(
+        self, native_id: str, allowed: tuple[str, ...], bypass: bool = False
+    ) -> list[str]:
+        # Not stream-json: what was said is read back off the transcript, so
+        # all that is wanted from the process is the closing summary.
+        argv = ["claude", "-p", "--resume", native_id, "--output-format", "json"]
+        if bypass:
+            return [*argv, "--permission-mode", "bypassPermissions"]
+        return [*argv, "--allowedTools", *allowed]
 
     def resumable_from(self, path: Path, cwd: str) -> bool:
         return path.parent.name == encode(cwd)
