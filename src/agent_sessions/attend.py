@@ -141,6 +141,7 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
         # Before the turn, not after: the thread should show something within
         # seconds of asking, and this is the comment the answer will replace.
         note = control.post(issue.number, comment.working(prompt.body))
+        log.say(f"#{issue.number} working, in comment {note}")
         # Held for the length of the turn, so a resume from the terminal is
         # refused rather than opening a second agent on the same transcript.
         with attending.holding(session["native_id"]):
@@ -168,6 +169,7 @@ def _shown(control: Control, note: int, started: float) -> Callable[[list[Block]
 
     def show(blocks: list[Block]) -> None:
         control.edit(note, comment.working("", blocks, time.monotonic() - started))
+        log.detail(f"showed {len(blocks)} blocks in comment {note}")
 
     return show
 
@@ -184,6 +186,7 @@ def _rewind(control: Control, conn: Any, issue: channel.Issue) -> bool:
     asked = next((i for i, c in enumerate(comments) if c.rewind_wanted), None)
     if asked is None:
         return False
+    log.say(f"#{issue.number} rewind asked for at comment {comments[asked].id}")
     # An exchange is my prompt and the answer to it. Tapping the answer means
     # undoing both, so the deleting starts at the prompt either way.
     start = asked
@@ -201,8 +204,10 @@ def _rewind(control: Control, conn: Any, issue: channel.Issue) -> bool:
     forked = f"{session['agent']}:{native}"
     log.say(f"#{issue.number} rewound to {at_uuid[:8]}, now {forked}")
     reindex(conn)
+    log.detail(f"#{issue.number} reindexed after the fork")
     for gone in comments[start:]:
         control.delete(gone.id)
+    log.say(f"#{issue.number} deleted {len(comments[start:])} comments rewound over")
     control.set_body(issue.number, comment.body(session | {"id": forked}, _said(session)))
     return True
 
