@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from agent_sessions import attend, channel, index
+from agent_sessions import attend, channel, comment, index
 from agent_sessions.models import Block, Ran, Running, Said
 
 
@@ -25,6 +25,7 @@ class FakeChannel:
     taken: list[int] = field(default_factory=list)
     bodies: dict[int, str] = field(default_factory=dict)
     titles: list[str] = field(default_factory=list)
+    deleted: list[int] = field(default_factory=list)
 
     def open(self, title: str, body: str) -> channel.Issue:
         self.titles.append(title)
@@ -44,6 +45,9 @@ class FakeChannel:
 
     def edit(self, comment_id: int, body: str) -> None:
         self.edited.append((comment_id, body))
+
+    def delete(self, comment_id: int) -> None:
+        self.deleted.append(comment_id)
 
     def take_up(self, comment_id: int) -> None:
         self.taken.append(comment_id)
@@ -394,3 +398,104 @@ def test_a_stale_progress_comment_does_not_count_as_an_answer(turns: list[dict],
     c = FakeChannel([issue()], {4: [prompt(11, "cut off", taken=True), stale]})
     attend.once(c, conn=None)
     assert turns[0]["prompt"] == "cut off"
+
+
+# --- the body is what the transcript says, not what the thread does ----------
+
+
+def test_the_body_lists_the_turns_in_the_transcript(
+    turns: list[dict], found, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A prompt that never ran is on GitHub and not in the session.
+
+    Listing comments made the body assert turns the agent has no knowledge of.
+    The transcript is what it will resume from, so that is what the body shows.
+    """
+    monkeypatch.setattr(
+        index.SOURCES["claude"],
+        "blocks",
+        lambda path, since="": [
+            Said(role="user", text="what actually ran"),
+            Said(role="assistant", text="an answer"),
+        ],
+    )
+    c = FakeChannel([issue()], {4: [prompt(11, "never ran")]})
+    attend.once(c, conn=None)
+    assert "what actually ran" in c.bodies[4]
+    assert "an answer" not in c.bodies[4]
+
+
+# --- rewinding by tapping once ------------------------------------------------
+
+
+def rewound(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    forks: list[str] = []
+
+    def fork(path, at_uuid: str) -> str:
+        forks.append(at_uuid)
+        return "newnative"
+
+    monkeypatch.setattr(index.SOURCES["claude"], "fork_at", fork)
+    monkeypatch.setattr(attend, "reindex", lambda conn: None)
+    return forks
+
+
+def answered(at_uuid: str = "9f3c1d20", id: int = 12) -> channel.Comment:
+    return channel.Comment(
+        id=id, body=f"{channel.MARKER}\n{comment.at(at_uuid)}\nDone.", author="a[bot]"
+    )
+
+
+def test_a_thumbs_down_on_an_answer_forks_at_the_point_it_recorded(
+    turns: list[dict], found, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    forks = rewound(monkeypatch)
+    down = channel.Comment(id=12, body=answered().body, author="a[bot]", rewind_wanted=True)
+    c = FakeChannel([issue()], {4: [prompt(11, "the prompt"), down]})
+    attend.once(c, conn=None)
+    assert forks == ["9f3c1d20"]
+
+
+def test_a_thumbs_down_on_my_prompt_means_the_same_point(
+    turns: list[dict], found, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Undo this exchange, whichever half of it I happened to tap."""
+    forks = rewound(monkeypatch)
+    down = prompt(11, "forget I asked")
+    down = channel.Comment(id=11, body=down.body, author="dandavison", rewind_wanted=True)
+    c = FakeChannel([issue()], {4: [down, answered()]})
+    attend.once(c, conn=None)
+    assert forks == ["9f3c1d20"]
+
+
+def test_the_rewound_exchange_is_deleted(
+    turns: list[dict], found, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The transcript keeps it; the thread is only the live conversation."""
+    rewound(monkeypatch)
+    down = channel.Comment(id=12, body=answered().body, author="a[bot]", rewind_wanted=True)
+    later = prompt(13, "and this came after")
+    c = FakeChannel([issue()], {4: [prompt(11, "the prompt"), down, later]})
+    attend.once(c, conn=None)
+    assert set(c.deleted) == {11, 12, 13}
+
+
+def test_the_issue_then_names_the_forked_session(
+    turns: list[dict], found, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rewound(monkeypatch)
+    down = channel.Comment(id=12, body=answered().body, author="a[bot]", rewind_wanted=True)
+    c = FakeChannel([issue()], {4: [prompt(11, "the prompt"), down]})
+    attend.once(c, conn=None)
+    assert "claude:newnative" in c.bodies[4]
+
+
+def test_a_rewind_does_not_also_run_the_prompt_it_undid(
+    turns: list[dict], found, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It was just deleted. Answering it would be answering a question I withdrew."""
+    rewound(monkeypatch)
+    down = channel.Comment(id=11, body="forget I asked", author="dandavison", rewind_wanted=True)
+    c = FakeChannel([issue()], {4: [down, answered()]})
+    attend.once(c, conn=None)
+    assert turns == []

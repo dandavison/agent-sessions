@@ -32,6 +32,10 @@ MARKER = "<!-- agent-work:turn -->"
 # leaves one behind, and a half-written progress note is not a reply.
 RUNNING = "<!-- agent-work:running -->"
 
+# Where the session was before the turn this comment answers. Rewinding is a
+# tap on a comment, so the comment is where the point has to live.
+AT = "agent-work:at"
+
 # What GitHub accepts in one comment. Truncation is not a nicety: a test run
 # clears this on its own and the post would simply fail.
 LIMIT = 65_536
@@ -86,7 +90,17 @@ LANGUAGES = {
 PATH_KEYS = ("file_path", "path", "notebook_path")
 
 
-def render(blocks: list[Block], summary: dict[str, Any] | None = None) -> str:
+def at(uuid: str) -> str:
+    return f"<!-- {AT} {uuid} -->"
+
+
+def point(body: str) -> str:
+    """The transcript point a comment was answered from, if it recorded one."""
+    found = re.search(rf"<!--\s*{AT}\s+(\S+)\s*-->", body)
+    return found.group(1) if found else ""
+
+
+def render(blocks: list[Block], summary: dict[str, Any] | None = None, at_uuid: str = "") -> str:
     """A turn as the comment to post for it: a formatter over the one parser.
 
     The same blocks the terminal and the pages are shown, so a conversation
@@ -110,7 +124,7 @@ def render(blocks: list[Block], summary: dict[str, Any] | None = None) -> str:
     # Said first, run second, each in the order it happened. A turn answers
     # last, and a comment opens at the top: posted chronologically, the answer
     # sits under every fold and has to be scrolled to on a phone.
-    parts = [*said, *ran, _footer(summary)]
+    parts = [at(at_uuid) if at_uuid else "", *said, *ran, _footer(summary)]
     return _fit(redact("\n\n".join(p for p in parts if p)))
 
 

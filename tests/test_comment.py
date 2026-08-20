@@ -157,7 +157,7 @@ def test_the_frontmatter_survives_a_round_trip() -> None:
 
 def test_an_answer_records_where_the_session_was_before_it() -> None:
     """Rewinding needs a transcript point, and a comment is what I tap to ask for it."""
-    out = comment.render([said("Done.")], DONE, at="9f3c1d20")
+    out = comment.render([said("Done.")], DONE, at_uuid="9f3c1d20")
     assert comment.point(out) == "9f3c1d20"
 
 
@@ -167,5 +167,5 @@ def test_an_answer_without_a_point_has_none_to_read_back() -> None:
 
 def test_the_point_is_not_visible_in_the_rendered_comment() -> None:
     """An HTML comment: on the page it is nothing, in the body it is durable."""
-    out = comment.render([said("Done.")], DONE, at="9f3c1d20")
-    assert "9f3c1d20" not in out.replace(comment.at(("9f3c1d20")), "")
+    out = comment.render([said("Done.")], DONE, at_uuid="9f3c1d20")
+    assert "9f3c1d20" not in out.replace(comment.at("9f3c1d20"), "")

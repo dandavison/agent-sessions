@@ -46,6 +46,11 @@ REPO = os.environ.get("AGENT_WORK_REPO", "dandavison/agent-work")
 # shows something within seconds of asking for it.
 SEEN = "eyes"
 
+# One tap, on my prompt or on the answer to it, meaning: put the session back
+# the way it was before this. Cheap to notice — the reaction summary comes back
+# with every comment already.
+REWIND = "-1"
+
 # The app, when there is one. Named rather than discovered, so that running
 # without it is a choice and not an accident.
 APP_ID = "AGENT_WORK_APP_ID"
@@ -78,6 +83,7 @@ class Comment:
     body: str
     author: str
     taken_up: bool = False
+    rewind_wanted: bool = False
 
     @property
     def is_ours(self) -> bool:
@@ -93,6 +99,11 @@ class Comment:
     def is_progress(self) -> bool:
         """A turn still writing into this, or one that died while it was."""
         return RUNNING in self.body
+
+    @property
+    def point(self) -> str:
+        """Where the session was before the turn this comment answers."""
+        return comment.point(self.body)
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +157,10 @@ class Channel:
         """Rewrite a comment. Edits do not notify, which is what makes progress bearable."""
         self._send("PATCH", f"/repos/{self.repo}/issues/comments/{comment_id}", {"body": body})
 
+    def delete(self, comment_id: int) -> None:
+        """Rewound work is in the transcript; the thread is only the live conversation."""
+        self._send("DELETE", f"/repos/{self.repo}/issues/comments/{comment_id}", {})
+
     def take_up(self, comment_id: int) -> None:
         self._send(
             "POST", f"/repos/{self.repo}/issues/comments/{comment_id}/reactions", {"content": SEEN}
@@ -197,6 +212,7 @@ def _comment(raw: dict[str, Any]) -> Comment:
         body=raw.get("body") or "",
         author=(raw.get("user") or {}).get("login", ""),
         taken_up=bool((raw.get("reactions") or {}).get(SEEN)),
+        rewind_wanted=bool((raw.get("reactions") or {}).get(REWIND)),
     )
 
 
