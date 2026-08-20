@@ -33,7 +33,10 @@ import orjson
 from agent_sessions import attending, channel, comment, index, log, query
 from agent_sessions.models import Block, Ran, Said
 
-INTERVAL = 5.0
+# A poll that finds nothing returns 304 and costs no rate limit, so this is
+# bounded by politeness rather than budget: one pass is a request for the issue
+# list plus one per open issue.
+INTERVAL = 2.0
 
 # How often the transcript is looked at while a turn runs, and how long it may
 # say nothing before saying that it is alive.
