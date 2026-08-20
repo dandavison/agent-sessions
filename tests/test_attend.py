@@ -208,3 +208,48 @@ def test_the_new_issue_is_titled_as_the_session_is(turns: list[dict]) -> None:
     opened = FakeChannel([])
     attend.issue_for(opened, SESSION | {"title": "why is conform relocating"})
     assert opened.titles == ["why is conform relocating"]
+
+
+# --- what it says about itself, and surviving a bad pass ---------------------
+
+
+def test_a_pass_that_fails_does_not_end_the_loop(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    """A blip at GitHub while I am out must not be the end of it.
+
+    The loop runs for hours unattended; an exception out of one pass is a
+    reason to say so and poll again, not to stop answering until I get home.
+    """
+
+    class Broken:
+        def issues(self):
+            raise RuntimeError("github said 502")
+
+    attend.a_pass(Broken(), conn=None)
+    assert "github said 502" in capsys.readouterr().err
+
+
+def test_noticing_a_prompt_is_logged(turns: list[dict], found, capsys) -> None:
+    c = FakeChannel([issue()], {4: [prompt(11, "try it with -x")]})
+    attend.once(c, conn=None)
+    err = capsys.readouterr().err
+    assert "#4" in err
+    assert "try it with -x" in err
+
+
+def test_how_long_a_turn_took_is_logged(turns: list[dict], found, capsys) -> None:
+    """The question while waiting in a park is always `is it still going`."""
+    c = FakeChannel([issue()], {4: [prompt()]})
+    attend.once(c, conn=None)
+    assert "s)" in capsys.readouterr().err
+
+
+def test_taking_a_session_over_is_logged(
+    turns: list[dict], found, capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        index.SOURCES["claude"], "live", lambda: {"7e90": Running(pid=42, status="idle")}
+    )
+    monkeypatch.setattr(attend, "take_over", lambda pid: None)
+    c = FakeChannel([issue()], {4: [prompt()]})
+    attend.once(c, conn=None)
+    assert "42" in capsys.readouterr().err
