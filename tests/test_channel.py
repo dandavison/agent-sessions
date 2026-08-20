@@ -326,3 +326,33 @@ def test_a_comment_can_be_deleted() -> None:
     c = channel_over({"DELETE /repos/dandavison/agent-work/issues/comments/13": {}}, seen)
     c.delete(13)
     assert seen[-1].method == "DELETE"
+
+
+def test_an_answer_that_writes_about_the_markers_is_still_an_answer() -> None:
+    """The loop replied about its own markers, and then replied for ever.
+
+    `is_progress` matched the string anywhere in the body, so an answer whose
+    prose quoted `agent-work:running` was read as a half-finished turn. That
+    made the prompt above it look unanswered, so it was retried — and the retry
+    wrote about the markers too. A stable server would still have looped.
+    """
+    about = channel.Comment(
+        id=12,
+        body=f"{channel.MARKER}\nThe marker is `{channel.RUNNING}`, written first.",
+        author="dandavison-agent[bot]",
+    )
+    assert about.is_ours
+    assert not about.is_progress
+
+
+def test_a_prompt_quoting_the_turn_marker_is_still_my_prompt() -> None:
+    """Same substring trap, and it would silently swallow what I asked."""
+    asking = channel.Comment(
+        id=11, body=f"why does {channel.MARKER} appear twice?", author="dandavison"
+    )
+    assert not asking.is_ours
+
+
+def test_a_real_progress_comment_is_still_progress() -> None:
+    running = channel.Comment(id=13, body=f"{channel.RUNNING}\nworking…", author="a[bot]")
+    assert running.is_progress
