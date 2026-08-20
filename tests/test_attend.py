@@ -70,8 +70,8 @@ def turns(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     """What the agent was asked to do, without asking it."""
     ran: list[dict] = []
 
-    def fake(session: dict, text: str, permission) -> tuple[list[Said], dict]:
-        ran.append({"session": session["id"], "prompt": text, "permission": permission})
+    def fake(session: dict, text: str) -> tuple[list[Said], dict]:
+        ran.append({"session": session["id"], "prompt": text})
         return [Said(role="assistant", text="Done.")], {}
 
     monkeypatch.setattr(attend, "run_turn", fake)
@@ -168,15 +168,6 @@ def test_an_issue_without_frontmatter_is_ignored_not_guessed_at(turns: list[dict
     assert c.posted == []
 
 
-# --- what it is allowed to do -------------------------------------------------
-
-
-def test_the_allowlist_does_not_include_a_bare_bash(turns: list[dict], found) -> None:
-    """`Bash` with no pattern is every command there is."""
-    assert "Bash" not in attend.READING.allowed
-    assert "Bash" not in attend.WRITING.allowed
-
-
 # --- opening the issue that makes a session reachable -------------------------
 
 
@@ -198,58 +189,3 @@ def test_the_new_issue_is_titled_as_the_session_is(turns: list[dict]) -> None:
     opened = FakeChannel([])
     attend.issue_for(opened, SESSION | {"title": "why is conform relocating"})
     assert opened.titles == ["why is conform relocating"]
-
-
-# --- what a prompt is allowed to do, decided per prompt -----------------------
-
-
-def test_by_default_a_prompt_cannot_change_anything(turns: list[dict], found) -> None:
-    """I am in the park and cannot review a diff. Reading is the default."""
-    c = FakeChannel([issue()], {4: [prompt(11, "what is failing?")]})
-    attend.once(c, conn=None)
-    assert turns[0]["permission"] is attend.READING
-    assert "Edit" not in attend.READING.allowed
-    assert "Write" not in attend.READING.allowed
-
-
-def test_asking_for_it_lets_a_prompt_change_things(turns: list[dict], found) -> None:
-    c = FakeChannel([issue()], {4: [prompt(11, "/write fix the failing test")]})
-    attend.once(c, conn=None)
-    assert turns[0]["permission"] is attend.WRITING
-    assert "Edit" in attend.WRITING.allowed
-
-
-def test_the_directive_is_not_part_of_the_prompt(turns: list[dict], found) -> None:
-    """`/write` says how to run the turn, not what the turn is about."""
-    c = FakeChannel([issue()], {4: [prompt(11, "/write fix the failing test")]})
-    attend.once(c, conn=None)
-    assert turns[0]["prompt"] == "fix the failing test"
-
-
-def test_a_word_that_only_looks_like_a_directive_is_prompt(turns: list[dict], found) -> None:
-    c = FakeChannel([issue()], {4: [prompt(11, "/writeup the findings")]})
-    attend.once(c, conn=None)
-    assert turns[0]["permission"] is attend.READING
-    assert turns[0]["prompt"] == "/writeup the findings"
-
-
-def test_everything_can_be_asked_for_but_has_to_be(turns: list[dict], found) -> None:
-    """The escape hatch, spelled out in the thread rather than set once and forgotten."""
-    c = FakeChannel([issue()], {4: [prompt(11, "/anything rebase onto main and push")]})
-    attend.once(c, conn=None)
-    assert turns[0]["permission"] is attend.ANYTHING
-    assert attend.ANYTHING.bypass
-
-
-def test_what_a_turn_was_allowed_is_said_in_the_thread(turns: list[dict], found) -> None:
-    """Reading the issue months later should not require guessing at this."""
-    c = FakeChannel([issue()], {4: [prompt(11, "/write fix it")]})
-    attend.once(c, conn=None)
-    assert "writing" in c.posted[0][1]
-
-
-def test_a_reading_turn_is_not_announced(turns: list[dict], found) -> None:
-    """The default needs no notice; only the departures from it do."""
-    c = FakeChannel([issue()], {4: [prompt(11, "what is failing?")]})
-    attend.once(c, conn=None)
-    assert "reading" not in c.posted[0][1]

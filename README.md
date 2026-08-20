@@ -75,25 +75,15 @@ nothing against the rate limit, so the interval is a free choice.
 
 ### What a prompt may do
 
-Reading, unless it says otherwise. I am not there to approve anything, so a
-turn's permissions are settled before it starts.
+Whatever I may. A turn runs under my own settings, so a comment on the issue is
+allowed exactly what a prompt typed at the keyboard is allowed — which, given
+`defaultMode: bypassPermissions`, is everything. What stands between a comment
+and this machine is who can reach the repo, and nothing else.
 
-    what is failing in test_web?            # read, search, run the tests
-    /write fix the failing assertion        # ... and edit files
-    /anything rebase onto main and push     # everything, no gate
-
-The escalation is per comment, so it is scoped to one turn and visible in the
-thread, and the footer records anything above the default.
-
-Turns run with `--setting-sources project,local`, which deliberately excludes
-`~/.claude/settings.json`. Mine sets `defaultMode: bypassPermissions` — right
-at a keyboard I am sitting at, and enough to make all of the above inert for a
-turn a comment can start.
-
-Two things to know before leaving it running. Tool output is posted to GitHub,
-and it holds what a commit never would; `redact` catches the token shapes it
-can, and that is not a guarantee. And the laptop has to be awake and online —
-`caffeinate -s`.
+Two more things to know before leaving it running. Tool output is posted to
+GitHub, and it holds what a commit never would; `redact` catches the token
+shapes it can, and that is not a guarantee. And the laptop has to be awake and
+online — `caffeinate -s`.
 
 A session need not be picked up where it was left. `tree` and `show --turns`
 print the point each stretch and each turn ended at, and `<id>@<point>` resumes

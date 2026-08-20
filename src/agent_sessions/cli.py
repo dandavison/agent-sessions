@@ -459,14 +459,12 @@ def attend_channel(interval: float, single: bool) -> None:
     """Answer prompts left on the control channel, until interrupted.
 
     Polls for comments, runs each turn in the worktree its session belongs to,
-    and posts the result back. What a turn may do is fixed before it starts,
-    because there is nobody at the keyboard to be asked.
+    and posts the result back. A turn runs under my own settings, so a comment
+    on the issue is allowed whatever I am allowed.
     """
     conn = db.connect()
     control = channel.Channel()
     print(f"attending {control.repo}, every {interval:g}s", file=sys.stderr)
-    print(f"by default: {', '.join(attend.READING.allowed)}", file=sys.stderr)
-    print(f"or ask in the comment: {', '.join(sorted(attend.DIRECTIVES))}", file=sys.stderr)
     if single:
         attend.once(control, conn)
         return

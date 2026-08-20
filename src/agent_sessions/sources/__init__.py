@@ -61,13 +61,10 @@ class Source(Protocol):
         """Where the thread ends now, to ask what came after it later."""
         ...
 
-    def turn_command(
-        self, native_id: str, allowed: tuple[str, ...], bypass: bool = False
-    ) -> list[str]:
+    def turn_command(self, native_id: str) -> list[str]:
         """Argv for one turn of this session with nobody at the keyboard.
 
-        The prompt arrives on stdin. Nothing can be approved while it runs, so
-        what it may do has to be settled here, before it starts.
+        The prompt arrives on stdin.
         """
         ...
 

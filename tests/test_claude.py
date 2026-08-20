@@ -660,32 +660,20 @@ def test_no_registry_at_all(tmp_path: Path) -> None:
 # --- what a turn run with nobody watching is allowed to do -------------------
 
 
-def test_a_turn_does_not_inherit_my_own_permission_settings() -> None:
-    """The permission model is inert without this, and silently so.
+def test_a_turn_is_resumed_headlessly_and_asked_only_for_its_summary() -> None:
+    """No allowlist and no setting-sources: a turn runs under my own settings.
 
-    `~/.claude/settings.json` here carries `defaultMode: bypassPermissions` and
-    a bare `Bash` allow, which is right for a session I am sitting in front of
-    and wrong for one a comment on an issue can start. Measured, not assumed:
-    with user settings loaded, a turn given an allowlist of Read and Grep
-    created a file outside the working tree; without them, the same turn was
-    refused.
+    Deliberate, and worth a test so it is not quietly "fixed" back. Mine say
+    `defaultMode: bypassPermissions`, so a prompt left on the control channel
+    is allowed whatever a prompt typed at the keyboard is allowed. What stands
+    between a comment and this machine is who can reach the repo, and nothing
+    else.
     """
-    argv = ClaudeSource().turn_command("7e90", ("Read", "Grep"))
-    assert "--setting-sources" in argv
-    assert argv[argv.index("--setting-sources") + 1] == "project,local"
-
-
-def test_a_turn_is_told_what_it_may_use() -> None:
-    argv = ClaudeSource().turn_command("7e90", ("Read", "Grep"))
-    assert argv[argv.index("--allowedTools") + 1 :] == ["Read", "Grep"]
-
-
-def test_asking_for_anything_says_so_rather_than_listing_tools() -> None:
-    argv = ClaudeSource().turn_command("7e90", (), bypass=True)
-    assert "--allowedTools" not in argv
-    assert argv[argv.index("--permission-mode") + 1] == "bypassPermissions"
-
-
-def test_even_asking_for_anything_does_not_load_my_settings() -> None:
-    """`/anything` means every tool, not every setting: the deny list stays mine."""
-    assert "--setting-sources" in ClaudeSource().turn_command("7e90", (), bypass=True)
+    assert ClaudeSource().turn_command("7e90") == [
+        "claude",
+        "-p",
+        "--resume",
+        "7e90",
+        "--output-format",
+        "json",
+    ]
