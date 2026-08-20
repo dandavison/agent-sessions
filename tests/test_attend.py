@@ -297,3 +297,23 @@ def _alive(times: int):
     """A process that is running for `times` checks and then is not."""
     checks = iter([True] * times + [False] * 100)
     return lambda: next(checks)
+
+
+def test_it_says_where_the_turn_is_running(turns: list[dict], found, capsys) -> None:
+    """Which worktree it landed in is the first thing I check when output surprises me."""
+    c = FakeChannel([issue()], {4: [prompt()]})
+    attend.once(c, conn=None)
+    assert SESSION["cwd"] in capsys.readouterr().err
+
+
+def test_it_says_that_it_posted_and_how_much(turns: list[dict], found, capsys) -> None:
+    """A posted comment that never appears is a different bug from one never written."""
+    c = FakeChannel([issue()], {4: [prompt()]})
+    attend.once(c, conn=None)
+    assert "posted" in capsys.readouterr().err
+
+
+def test_it_says_how_many_prompts_are_waiting(turns: list[dict], found, capsys) -> None:
+    c = FakeChannel([issue()], {4: [prompt(11, "first"), prompt(12, "second")]})
+    attend.once(c, conn=None)
+    assert "2 waiting" in capsys.readouterr().err

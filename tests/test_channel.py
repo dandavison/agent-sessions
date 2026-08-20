@@ -178,3 +178,16 @@ def test_github_saying_no_is_not_swallowed() -> None:
     c = channel_over({})
     with pytest.raises(httpx.HTTPError):
         c.issues()
+
+
+# --- and saying what it asked GitHub -----------------------------------------
+
+
+def test_every_call_to_github_is_logged_in_detail(monkeypatch, capsys) -> None:
+    """When nothing is happening, the question is whether it is even asking."""
+    monkeypatch.setattr(channel.log, "VERBOSE", True)
+    c = channel_over({"GET /repos/dandavison/agent-work/issues": [ISSUE]})
+    c.issues()
+    err = capsys.readouterr().err
+    assert "/repos/dandavison/agent-work/issues" in err
+    assert "200" in err
