@@ -92,13 +92,20 @@ class Comment:
         The author, for anything the app posted. The marker, for the comments
         posted back when this ran as me — without it, a repo full of those
         becomes a queue of prompts the moment the app is turned on.
+
+        The marker has to be where the loop writes it, at the start. Matched
+        anywhere, an answer that merely wrote *about* the markers counted as
+        one, and this conversation is full of those.
         """
-        return self.author.endswith("[bot]") or MARKER in self.body or self.is_progress
+        return self.author.endswith("[bot]") or self._starts(MARKER) or self.is_progress
 
     @property
     def is_progress(self) -> bool:
         """A turn still writing into this, or one that died while it was."""
-        return RUNNING in self.body
+        return self._starts(RUNNING)
+
+    def _starts(self, marker: str) -> bool:
+        return self.body.lstrip().startswith(marker)
 
     @property
     def point(self) -> str:
