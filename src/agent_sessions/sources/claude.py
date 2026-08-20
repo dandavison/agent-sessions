@@ -13,6 +13,7 @@ point of the index is work I took part in, and nobody talked to those.
 import os
 from collections import defaultdict
 from collections.abc import Iterator
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -121,11 +122,21 @@ def _discovered(id: str, path: Path) -> Discovered:
 
 
 def _read(path: Path) -> list[dict[str, Any]]:
+    """Every record in the file, tolerating a last line still being written.
+
+    A turn appends while progress is read off the same file, so catching it
+    mid-line is the normal case and not a corrupt transcript. Only the last
+    line is allowed to be unfinished; anything else is a real problem and
+    should be loud.
+    """
     records = []
     with path.open("rb") as f:
-        for line in f:
-            if line.strip():
-                records.append(orjson.loads(line))
+        lines = [line for line in f if line.strip()]
+    for line in lines[:-1]:
+        records.append(orjson.loads(line))
+    if lines:
+        with suppress(orjson.JSONDecodeError):
+            records.append(orjson.loads(lines[-1]))
     return records
 
 

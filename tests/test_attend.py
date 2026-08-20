@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from agent_sessions import attend, channel, index
-from agent_sessions.models import Ran, Running, Said
+from agent_sessions.models import Block, Ran, Running, Said
 
 
 @dataclass
@@ -240,7 +240,7 @@ def test_how_long_a_turn_took_is_logged(turns: list[dict], found, capsys) -> Non
     """The question while waiting in a park is always `is it still going`."""
     c = FakeChannel([issue()], {4: [prompt()]})
     attend.once(c, conn=None)
-    assert "s)" in capsys.readouterr().err
+    assert "answered in" in capsys.readouterr().err
 
 
 def test_taking_a_session_over_is_logged(
@@ -258,20 +258,21 @@ def test_taking_a_session_over_is_logged(
 # --- saying something while a turn is running --------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _brisk(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The watcher's poll is a real second in production and none in a test."""
+    monkeypatch.setattr(attend, "POLL", 0.0)
+
+
 def test_what_the_turn_does_is_said_as_it_does_it(capsys) -> None:
     """`--output-format json` says nothing until it exits, and a turn is minutes.
 
     The turn appends to the transcript as it goes, so the progress is already
     on disk; watching the file is how it reaches the terminal.
     """
-    arriving = [
-        [],
-        [Ran(tool="Read", input={"file_path": "/x/a.py"})],
-        [
-            Ran(tool="Read", input={"file_path": "/x/a.py"}),
-            Ran(tool="Bash", input={"command": "pytest"}),
-        ],
-    ]
+    read = Ran(tool="Read", input={"file_path": "/x/a.py"})
+    tests = Ran(tool="Bash", input={"command": "pytest"})
+    arriving: list[list[Block]] = [[], [read], [read, tests]]
     attend.watch(lambda: arriving.pop(0) if len(arriving) > 1 else arriving[0], alive=_alive(3))
     err = capsys.readouterr().err
     assert "Read" in err
@@ -279,7 +280,7 @@ def test_what_the_turn_does_is_said_as_it_does_it(capsys) -> None:
 
 
 def test_a_block_is_not_reported_twice(capsys) -> None:
-    same = [Ran(tool="Read", input={"file_path": "/x/a.py"})]
+    same: list[Block] = [Ran(tool="Read", input={"file_path": "/x/a.py"})]
     attend.watch(lambda: same, alive=_alive(4))
     assert capsys.readouterr().err.count("Read") == 1
 
@@ -287,7 +288,8 @@ def test_a_block_is_not_reported_twice(capsys) -> None:
 def test_a_turn_that_says_nothing_still_says_it_is_alive(capsys, monkeypatch) -> None:
     """Thinking for two minutes and a wedged process look identical otherwise."""
     monkeypatch.setattr(attend, "HEARTBEAT", 0.0)
-    attend.watch(lambda: [], alive=_alive(2))
+    nothing: list[Block] = []
+    attend.watch(lambda: nothing, alive=_alive(2))
     assert "still going" in capsys.readouterr().err
 
 

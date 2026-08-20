@@ -22,16 +22,23 @@ import os
 import signal
 import subprocess
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
+from threading import Thread
 from typing import Any, Protocol
 
 import orjson
 
 from agent_sessions import attending, channel, comment, index, log, query
-from agent_sessions.models import Block, Said
+from agent_sessions.models import Block, Ran, Said
 
 INTERVAL = 5.0
+
+# How often the transcript is looked at while a turn runs, and how long it may
+# say nothing before saying that it is alive.
+POLL = 1.0
+HEARTBEAT = 20.0
 
 # Long enough for an agent to put its affairs in order on SIGTERM.
 TAKEOVER_WAIT = 10.0
@@ -122,7 +129,7 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
         with attending.holding(session["native_id"]):
             blocks, summary = run_turn(session, prompt.body)
         log.say(
-            f"#{issue.number} answered in {time.monotonic() - started:.0f}s)"
+            f"#{issue.number} answered in {time.monotonic() - started:.0f}s"
             f" — {len(blocks)} blocks, ${summary.get('total_cost_usd', 0):.2f}"
         )
         control.post(issue.number, displaced + comment.render(blocks, summary))
@@ -188,17 +195,78 @@ def run_turn(session: dict[str, Any], prompt: str) -> tuple[list[Block], dict[st
     source = index.SOURCES[session["agent"]]
     path = Path(session["path"])
     before = source.leaf(path)
-    done = subprocess.run(
+    done = _spawn(
         source.turn_command(session["native_id"]),
         cwd=session["cwd"],
-        input=prompt,
-        capture_output=True,
-        text=True,
-        timeout=TIMEOUT,
-        check=False,
+        prompt=prompt,
+        watching=lambda: source.blocks(path, since=before),
     )
     blocks = source.blocks(path, since=before)
     return (blocks or [_failed(done)]), _summary(done.stdout)
+
+
+def _spawn(
+    argv: list[str], cwd: str, prompt: str, watching: Callable[[], list[Block]]
+) -> subprocess.CompletedProcess[str]:
+    """Run the turn, saying what it does while it does it.
+
+    The process says nothing until it exits, so the progress comes off the
+    transcript it is appending to. Talking to the process is on its own thread
+    only so that this one is free to watch the file.
+    """
+    proc = subprocess.Popen(
+        argv,
+        cwd=cwd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    spoken: dict[str, str] = {}
+
+    def talk() -> None:
+        spoken["out"], spoken["err"] = proc.communicate(prompt, timeout=TIMEOUT)
+
+    worker = Thread(target=talk, daemon=True)
+    worker.start()
+    watch(watching, alive=worker.is_alive)
+    worker.join(TIMEOUT)
+    if worker.is_alive():
+        proc.kill()
+        worker.join(5)
+        log.problem(f"the turn passed {TIMEOUT:.0f}s and was killed")
+    return subprocess.CompletedProcess(
+        argv, proc.returncode or 0, spoken.get("out", ""), spoken.get("err", "")
+    )
+
+
+def watch(blocks: Callable[[], list[Block]], alive: Callable[[], bool]) -> None:
+    """Report what the turn has done so far, until it stops running.
+
+    Said as it lands rather than at the end, because the question while waiting
+    is always whether the thing is still moving.
+    """
+    reported = 0
+    quiet = time.monotonic()
+    while alive():
+        for block in blocks()[reported:]:
+            log.say(f"  {_progress(block)}")
+            reported += 1
+            quiet = time.monotonic()
+        if time.monotonic() - quiet >= HEARTBEAT:
+            log.say(f"  still going ({reported} so far)")
+            quiet = time.monotonic()
+        time.sleep(POLL)
+
+
+def _progress(block: Block) -> str:
+    match block:
+        case Ran():
+            return f"{block.tool} {_oneline(str(next(iter(block.input.values()), '')))}"
+        case Said():
+            return _oneline(block.text)
+        case _:
+            return "compacted"
 
 
 def _summary(stdout: str) -> dict[str, Any]:
