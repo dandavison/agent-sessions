@@ -43,9 +43,15 @@ def channel_over(routes: dict[str, object], seen: list[httpx.Request] | None = N
     )
 
 
-ISSUE = {"number": 4, "title": "why is conform relocating", "body": "| session | claude:7e90 |"}
-MINE = {"id": 11, "body": "try it with -x", "user": {"login": "dandavison"}}
-OURS = {"id": 12, "body": "<!-- agent-work:turn -->\nDone.", "user": {"login": "dandavison"}}
+ISSUE: dict[str, object] = {
+    "number": 4,
+    "title": "why is conform relocating",
+    "body": "| session | claude:7e90 |",
+}
+MINE_BODY = "try it with -x"
+OURS_BODY = "<!-- agent-work:turn -->\nDone."
+MINE: dict[str, object] = {"id": 11, "body": MINE_BODY, "user": {"login": "dandavison"}}
+OURS: dict[str, object] = {"id": 12, "body": OURS_BODY, "user": {"login": "dandavison"}}
 
 
 # --- reading ----------------------------------------------------------------
@@ -108,8 +114,8 @@ def test_nothing_new_means_nothing_changed_not_nothing_there() -> None:
 
 def test_what_it_wrote_is_not_a_prompt() -> None:
     """It posts as me, so the author says nothing. The marker is what says it."""
-    assert channel.Comment(id=12, body=OURS["body"], author="dandavison").is_ours
-    assert not channel.Comment(id=11, body=MINE["body"], author="dandavison").is_ours
+    assert channel.Comment(id=12, body=OURS_BODY, author="dandavison").is_ours
+    assert not channel.Comment(id=11, body=MINE_BODY, author="dandavison").is_ours
 
 
 def test_a_prompt_already_taken_up_is_not_taken_up_again() -> None:
@@ -136,7 +142,9 @@ def test_a_posted_turn_carries_the_marker() -> None:
 def test_taking_a_prompt_up_is_visible_from_the_park() -> None:
     """The eyes appear within seconds of posting, so the thing is seen to be alive."""
     seen: list[httpx.Request] = []
-    c = channel_over({"POST /repos/dandavison/agent-work/comments/11/reactions": {"id": 1}}, seen)
+    c = channel_over(
+        {"POST /repos/dandavison/agent-work/issues/comments/11/reactions": {"id": 1}}, seen
+    )
     c.take_up(11)
     assert b"eyes" in seen[-1].content
 

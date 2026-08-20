@@ -48,6 +48,14 @@ class Source(Protocol):
         """
         ...
 
+    def turn_command(self, native_id: str, allowed: list[str]) -> list[str]:
+        """Argv for one turn of this session with nobody at the keyboard.
+
+        The prompt arrives on stdin. Nothing can be approved while it runs, so
+        what it may do has to be settled here, before it starts.
+        """
+        ...
+
     def resumable_from(self, path: Path, cwd: str) -> bool:
         """Whether an agent started in `cwd` would find this transcript.
 

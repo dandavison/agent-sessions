@@ -69,6 +69,19 @@ class ClaudeSource:
             + (" --remote-control" if remote else "")
         )
 
+    def turn_command(self, native_id: str, allowed: list[str]) -> list[str]:
+        return [
+            "claude",
+            "-p",
+            "--resume",
+            native_id,
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--allowedTools",
+            *allowed,
+        ]
+
     def resumable_from(self, path: Path, cwd: str) -> bool:
         return path.parent.name == encode(cwd)
 
