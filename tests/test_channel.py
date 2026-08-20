@@ -191,3 +191,86 @@ def test_every_call_to_github_is_logged_in_detail(monkeypatch, capsys) -> None:
     err = capsys.readouterr().err
     assert "/repos/dandavison/agent-work/issues" in err
     assert "200" in err
+
+
+# --- a bot of its own, so a reply is not my own activity ----------------------
+
+
+def test_a_comment_by_a_bot_is_not_a_prompt() -> None:
+    """The marker says it for old comments; the author says it for every new one.
+
+    Posting as myself is why nothing notified me: GitHub does not tell you about
+    your own activity, so the answer landing was silent and I reloaded to check.
+    """
+    assert channel.Comment(id=12, body="Done.", author="agent-work[bot]").is_ours
+    assert not channel.Comment(id=11, body=MINE_BODY, author="dandavison").is_ours
+
+
+def test_the_marker_still_says_it_for_what_was_posted_before() -> None:
+    """A repo full of comments posted as me must not become a queue of prompts."""
+    assert channel.Comment(id=12, body=OURS_BODY, author="dandavison").is_ours
+
+
+def app(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("AGENT_WORK_APP_ID", "12345")
+    monkeypatch.setenv("AGENT_WORK_APP_KEY", str(tmp_path / "key.pem"))
+    (tmp_path / "key.pem").write_text("-----BEGIN RSA PRIVATE KEY-----\nnot a key\n")
+
+
+def test_the_app_is_used_when_it_is_configured(monkeypatch, tmp_path) -> None:
+    """Explicitly configured, not silently preferred: without it, `gh` is the token."""
+    app(monkeypatch, tmp_path)
+    monkeypatch.setattr(channel, "_jwt", lambda app_id, key: "signed.jwt")
+    seen: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/app/installations":
+            return httpx.Response(200, json=[{"id": 999}])
+        if request.url.path == "/app/installations/999/access_tokens":
+            return httpx.Response(
+                201, json={"token": "ghs_installation", "expires_at": "2099-01-01T00:00:00Z"}
+            )
+        return httpx.Response(200, json=[])
+
+    monkeypatch.setattr(
+        channel,
+        "_new_client",
+        lambda: httpx.Client(
+            transport=httpx.MockTransport(handle), base_url="https://api.github.com"
+        ),
+    )
+    assert channel.token() == "ghs_installation"
+    assert seen[0].headers["authorization"] == "Bearer signed.jwt"
+
+
+def test_the_installation_token_is_not_minted_for_every_call(monkeypatch, tmp_path) -> None:
+    """It lasts an hour; minting one per poll would be two extra calls every two seconds."""
+    app(monkeypatch, tmp_path)
+    monkeypatch.setattr(channel, "_jwt", lambda app_id, key: "signed.jwt")
+    minted = {"n": 0}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/access_tokens"):
+            minted["n"] += 1
+            return httpx.Response(
+                201, json={"token": "ghs_x", "expires_at": "2099-01-01T00:00:00Z"}
+            )
+        return httpx.Response(200, json=[{"id": 999}])
+
+    monkeypatch.setattr(
+        channel,
+        "_new_client",
+        lambda: httpx.Client(
+            transport=httpx.MockTransport(handle), base_url="https://api.github.com"
+        ),
+    )
+    channel.token()
+    channel.token()
+    assert minted["n"] == 1
+
+
+def test_without_the_app_it_is_still_whatever_gh_is_signed_in_as(monkeypatch) -> None:
+    monkeypatch.delenv("AGENT_WORK_APP_ID", raising=False)
+    monkeypatch.setattr(channel, "_gh_token", lambda: "gho_mine")
+    assert channel.token() == "gho_mine"
