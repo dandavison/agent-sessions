@@ -138,17 +138,36 @@ def test_the_body_is_kept_up_to_date_with_what_i_have_said(turns: list[dict], fo
 # --- what it refuses ----------------------------------------------------------
 
 
-def test_a_session_open_in_a_terminal_is_not_touched(
+def test_a_session_open_in_a_terminal_is_taken_over(
     turns: list[dict], found, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Two agents on one transcript would corrupt it. Say so where I will read it."""
+    """I am not at that keyboard. The pane loses; the prompt I just sent wins.
+
+    Two agents on one transcript fork it and then fight over which branch is
+    live, so one of them has to go, and it is not the one I am talking to.
+    """
+    killed: list[int] = []
     monkeypatch.setattr(
-        index.SOURCES["claude"], "live", lambda: {"7e90": Running(pid=42, status="busy")}
+        index.SOURCES["claude"], "live", lambda: {"7e90": Running(pid=42, status="idle")}
     )
+    monkeypatch.setattr(attend, "take_over", lambda pid: killed.append(pid))
     c = FakeChannel([issue()], {4: [prompt()]})
     attend.once(c, conn=None)
-    assert turns == []
-    assert "running" in c.posted[0][1].lower()
+    assert killed == [42]
+    assert turns[0]["prompt"] == "try it with -x"
+
+
+def test_taking_a_session_over_is_said_in_the_thread(
+    turns: list[dict], found, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Coming home to a closed pane should not be a mystery."""
+    monkeypatch.setattr(
+        index.SOURCES["claude"], "live", lambda: {"7e90": Running(pid=42, status="idle")}
+    )
+    monkeypatch.setattr(attend, "take_over", lambda pid: None)
+    c = FakeChannel([issue()], {4: [prompt()]})
+    attend.once(c, conn=None)
+    assert "terminal" in c.posted[0][1].lower()
 
 
 def test_an_issue_naming_no_session_is_said_to_be_wrong(turns: list[dict], found) -> None:
