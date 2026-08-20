@@ -23,7 +23,7 @@ from typing import Any
 
 import httpx
 
-from agent_sessions import comment
+from agent_sessions import comment, log
 
 API = "https://api.github.com"
 REPO = os.environ.get("AGENT_WORK_REPO", "dandavison/agent-work")
@@ -121,6 +121,7 @@ class Channel:
         assert self.client is not None
         headers = {"If-None-Match": tag} if (tag := self._etags.get(path)) else {}
         response = self.client.get(path, params=params, headers=headers)
+        log.detail(f"GET {path} -> {response.status_code}")
         if response.status_code == 304:
             return self._cached.get(path, [])
         response.raise_for_status()
@@ -132,6 +133,7 @@ class Channel:
     def _send(self, method: str, path: str, payload: dict[str, str]) -> dict[str, Any]:
         assert self.client is not None
         response = self.client.request(method, path, json=payload)
+        log.detail(f"{method} {path} -> {response.status_code}")
         response.raise_for_status()
         return response.json() if response.content else {}
 

@@ -108,6 +108,7 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
     waiting = [c for c in control.comments(issue.number) if not c.is_ours and not c.taken_up]
     if not waiting:
         return 0
+    log.say(f"#{issue.number} {len(waiting)} waiting")
     session = lookup(conn, issue.session_id)
     answered = 0
     for prompt in waiting:
@@ -115,6 +116,7 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
         # The eyes first: a turn takes minutes, and without them it looks from
         # the park like the prompt fell on the floor.
         control.take_up(prompt.id)
+        log.detail(f"#{issue.number} eyes on comment {prompt.id}")
         if session is None:
             log.problem(f"#{issue.number} names {issue.session_id}, which is not a session")
             control.post(
@@ -123,6 +125,7 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
             )
             continue
         displaced = _clear_the_way(session)
+        log.say(f"#{issue.number} running {session['id']} in {session['cwd']}")
         started = time.monotonic()
         # Held for the length of the turn, so a resume from the terminal is
         # refused rather than opening a second agent on the same transcript.
@@ -132,7 +135,9 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
             f"#{issue.number} answered in {time.monotonic() - started:.0f}s"
             f" — {len(blocks)} blocks, ${summary.get('total_cost_usd', 0):.2f}"
         )
-        control.post(issue.number, displaced + comment.render(blocks, summary))
+        body = displaced + comment.render(blocks, summary)
+        control.post(issue.number, body)
+        log.say(f"#{issue.number} posted {len(body):,} chars")
         answered += 1
     _restate(control, issue, session)
     return answered
@@ -151,6 +156,7 @@ def _clear_the_way(session: dict[str, Any]) -> str:
         return ""
     log.say(f"taking {session['id']} over from pid {running.pid} ({running.status})")
     take_over(running.pid)
+    log.say(f"pid {running.pid} has gone")
     return (
         f"<sub>Taken over from a terminal ({running.status});"
         " resume it to pick it back up.</sub>\n\n"
@@ -178,6 +184,7 @@ def _restate(control: Control, issue: channel.Issue, session: dict[str, Any] | N
     """Keep the body current: it is the only place my turns appear without the agent's."""
     prompts = [c.body for c in control.comments(issue.number) if not c.is_ours]
     control.set_body(issue.number, comment.body(session or {"id": issue.session_id}, prompts))
+    log.detail(f"#{issue.number} body restated with {len(prompts)} prompts")
 
 
 def lookup(conn: Any, session_id: str) -> dict[str, Any] | None:
@@ -214,6 +221,7 @@ def _spawn(
     transcript it is appending to. Talking to the process is on its own thread
     only so that this one is free to watch the file.
     """
+    log.detail(f"$ {' '.join(argv)}")
     proc = subprocess.Popen(
         argv,
         cwd=cwd,
