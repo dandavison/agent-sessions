@@ -36,6 +36,17 @@ def test_what_the_agent_said_is_at_the_top_level() -> None:
     assert "<details" not in out.split("Replaced the retry loop.")[0]
 
 
+def test_the_answer_comes_before_the_work_that_produced_it() -> None:
+    """A turn runs tools first and answers last, and a comment opens at the top.
+
+    Posted in the order it happened, the two sentences I asked for sat under six
+    kilobytes of folded tool calls. A comment is a report, not a transcript; the
+    transcript keeps the chronology.
+    """
+    out = comment.render([ran("Read", file_path="/x/a.py"), said("The answer.")], DONE)
+    assert out.index("The answer.") < out.index("<details")
+
+
 def test_a_tool_call_is_folded_away() -> None:
     out = comment.render([ran("Bash", command="echo hello", output="hello")], DONE)
     assert "<details>" in out

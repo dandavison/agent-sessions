@@ -83,21 +83,25 @@ def render(blocks: list[Block], summary: dict[str, Any] | None = None) -> str:
     The same blocks the terminal and the pages are shown, so a conversation
     cannot read one way here and another way there.
     """
-    parts: list[str] = []
+    said: list[str] = []
+    ran: list[str] = []
     for block in blocks:
         match block:
             case Said(role="assistant", text=text):
-                parts.append(text.strip())
+                said.append(text.strip())
             case Ran():
-                parts.append(_tool(block))
+                ran.append(_tool(block))
             case Boundary():
-                parts.append(
+                said.append(
                     f"<sub>Compacted ({block.trigger}): "
                     f"{block.pre_tokens:,} → {block.post_tokens:,} tokens</sub>"
                 )
             case _:
                 pass
-    parts.append(_footer(summary))
+    # Said first, run second, each in the order it happened. A turn answers
+    # last, and a comment opens at the top: posted chronologically, the answer
+    # sits under every fold and has to be scrolled to on a phone.
+    parts = [*said, *ran, _footer(summary)]
     return _fit(redact("\n\n".join(p for p in parts if p)))
 
 
