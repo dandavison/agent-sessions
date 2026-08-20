@@ -92,7 +92,23 @@ class ClaudeSource:
     ) -> list[str]:
         # Not stream-json: what was said is read back off the transcript, so
         # all that is wanted from the process is the closing summary.
-        argv = ["claude", "-p", "--resume", native_id, "--output-format", "json"]
+        #
+        # Not my own settings either, and this is the load-bearing part. Mine
+        # say `defaultMode: bypassPermissions` with a bare `Bash` allowed,
+        # which is right at a keyboard I am sitting at and wrong for a turn a
+        # comment on an issue can start. Loaded, they made the allowlist inert
+        # — a turn allowed only Read and Grep still wrote a file outside the
+        # working tree, and --disallowedTools did not stop it either.
+        argv = [
+            "claude",
+            "-p",
+            "--resume",
+            native_id,
+            "--output-format",
+            "json",
+            "--setting-sources",
+            "project,local",
+        ]
         if bypass:
             return [*argv, "--permission-mode", "bypassPermissions"]
         return [*argv, "--allowedTools", *allowed]
