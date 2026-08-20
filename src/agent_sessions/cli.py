@@ -11,7 +11,19 @@ from pathlib import Path
 import click
 import segno
 
-from agent_sessions import agents, db, display, index, query, render, skill, topology, web
+from agent_sessions import (
+    agents,
+    attend,
+    channel,
+    db,
+    display,
+    index,
+    query,
+    render,
+    skill,
+    topology,
+    web,
+)
 from agent_sessions.agents import NotInstalled
 from agent_sessions.forget import forget as forget_session
 from agent_sessions.render import Format, Renderer
@@ -64,6 +76,8 @@ Examples
   $ agent-sessions cat claude:7e90a7c6 --tools
   $ agent-sessions resume claude:7e90a7c6
   $ agent-sessions resume claude:7e90a7c6@9f3c1d20
+  $ agent-sessions issue claude:7e90a7c6
+  $ agent-sessions attend
 """,
 )
 @click.version_option()
@@ -403,6 +417,58 @@ def _name(conn: sqlite3.Connection, id: str) -> str:
         if agent in ("", name) and source.locate(native_id):
             return f"{name}:{native_id}"
     return _resolve(conn, id)["id"]
+
+
+@main.command(
+    epilog="""\b
+Examples
+  $ agent-sessions issue claude:7e90a7c6      # reach it from a phone
+"""
+)
+@click.argument("id")
+@format_option
+def issue(id: str, fmt: str | None, as_json: bool, quiet: bool) -> None:
+    """Put a session on the control channel, so it can be carried on from anywhere.
+
+    An issue in a private repo, whose body says which session it is. A comment
+    of mine on it is a prompt; `attend` notices it, runs the turn here, and
+    posts what came back. Nothing listens on this machine for any of it.
+
+    Asking twice gives the same issue: which session an issue is for is written
+    in the issue, not in the index.
+    """
+    out = renderer(fmt, as_json, quiet)
+    conn = db.connect()
+    session = _resolve(conn, id)
+    opened = attend.issue_for(channel.Channel(), session)
+    out.record({"id": session["id"], "issue": opened.number, "url": opened.url})
+    out.hint(f"Comment on {opened.url} to carry it on. `agent-sessions attend` must be running.")
+
+
+@main.command(name="attend")
+@click.option(
+    "--interval",
+    default=attend.INTERVAL,
+    show_default=True,
+    help="Seconds between polls. A poll that finds nothing costs no rate limit.",
+)
+@click.option("--once", "single", is_flag=True, help="One pass, rather than staying up.")
+def attend_channel(interval: float, single: bool) -> None:
+    """Answer prompts left on the control channel, until interrupted.
+
+    Polls for comments, runs each turn in the worktree its session belongs to,
+    and posts the result back. What a turn may do is fixed before it starts,
+    because there is nobody at the keyboard to be asked.
+    """
+    conn = db.connect()
+    control = channel.Channel()
+    print(f"attending {control.repo}, every {interval:g}s", file=sys.stderr)
+    print(f"tools: {', '.join(attend.ALLOWED)}", file=sys.stderr)
+    if single:
+        attend.once(control, conn)
+        return
+    with suppress(KeyboardInterrupt):
+        attend.loop(control, conn, interval)
 
 
 @main.command()

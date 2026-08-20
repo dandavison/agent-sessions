@@ -136,9 +136,15 @@ def test_a_running_session_is_focused_rather_than_started_again(
 # --- and a link is enough to pick it up on a phone -------------------------
 
 
-def test_every_session_listed_can_be_picked_up_remotely(indexed: Path) -> None:
-    """The reason to be reading this page on a phone at all."""
-    assert f"/resume/{ID}?remote=1" in web.handle("/").body
+def test_every_session_listed_can_be_put_on_the_control_channel(indexed: Path) -> None:
+    """The reason to be reading this page on a phone at all.
+
+    The rows used to offer the agent's own remote control. They offer the
+    control channel instead — the remote-control route below still works, and
+    the CLI still has `--remote`, but it needs a subscription this account does
+    not have, and a row is not the place to find that out.
+    """
+    assert f"/issue/{ID}" in web.handle("/").body
 
 
 def test_following_the_remote_link_hands_the_session_to_the_agents_own_remote_control(
@@ -479,3 +485,58 @@ def test_the_project_box_offers_what_there_is(indexed: Path) -> None:
     body = web.handle("/").body
     assert "<datalist id=projects>" in body
     assert "<option value='wormhole'>" in body
+
+
+# --- and a link is enough to put it on the control channel -------------------
+
+
+def test_following_the_issue_link_opens_one_and_goes_to_it(
+    indexed: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Leaving this site is the point: the conversation carries on over there."""
+    opened: list[str] = []
+
+    class Fake:
+        def issues(self):
+            return []
+
+        def open(self, title: str, body: str):
+            opened.append(title)
+            return web.channel.Issue(
+                number=7, title=title, body=body, url="https://github.com/x/y/issues/7"
+            )
+
+    monkeypatch.setattr(web, "control", Fake)
+    response = web.handle(f"/issue/{ID}")
+    assert response.status == 303
+    assert response.location == "https://github.com/x/y/issues/7"
+    assert opened == ["why is conform relocating worktrees"]
+
+
+def test_a_session_that_already_has_an_issue_is_not_given_a_second(
+    indexed: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    existing = web.channel.Issue(
+        number=4, title="t", body=f"| session | {ID} |", url="https://github.com/x/y/issues/4"
+    )
+
+    class Fake:
+        def issues(self):
+            return [existing]
+
+        def open(self, title: str, body: str):
+            raise AssertionError("opened a second issue")
+
+    monkeypatch.setattr(web, "control", Fake)
+    assert web.handle(f"/issue/{ID}").location.endswith("/issues/4")
+
+
+def test_github_being_unreachable_is_reported_not_raised(
+    indexed: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Fake:
+        def issues(self):
+            raise web.channel.NoToken()
+
+    monkeypatch.setattr(web, "control", Fake)
+    assert web.handle(f"/issue/{ID}").status == 502

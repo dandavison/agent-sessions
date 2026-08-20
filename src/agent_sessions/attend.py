@@ -64,6 +64,21 @@ class Control(Protocol):
     def post(self, number: int, body: str) -> None: ...
     def take_up(self, comment_id: int) -> None: ...
     def set_body(self, number: int, body: str) -> None: ...
+    def open(self, title: str, body: str) -> channel.Issue: ...
+
+
+def issue_for(control: Control, session: dict[str, Any]) -> channel.Issue:
+    """The issue that makes this session reachable from a phone, opening one if needed.
+
+    Which session an issue is for is written in its body and read back from
+    there, so this asks GitHub rather than keeping a mapping of its own. The
+    index is safe to delete; the answer to `is there already an issue for this`
+    must not be.
+    """
+    for existing in control.issues():
+        if existing.session_id == session["id"]:
+            return existing
+    return control.open(session.get("title") or session["id"], comment.body(session, []))
 
 
 def loop(control: Control, conn: Any, interval: float = INTERVAL) -> None:

@@ -21,7 +21,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 import httpx
 
-from agent_sessions import db, display, index, query, resume, topology
+from agent_sessions import attend, channel, db, display, index, query, resume, topology
 from agent_sessions.wormhole import WormholeUnavailable
 
 HOST = "127.0.0.1"
@@ -49,6 +49,8 @@ def handle(path: str, query_string: str = "") -> Response:
             return _sync(conn)
         if id := _tail(path, "/resume/"):
             return _resume(conn, id, remote=params.get("remote") in ("1", "true"))
+        if id := _tail(path, "/issue/"):
+            return _issue(conn, id)
         if id := _tail(path, "/transcript/"):
             return _transcript(conn, id, params)
         if id := _tail(path, "/session/"):
@@ -288,6 +290,23 @@ def _resume(conn: sqlite3.Connection, id: str, remote: bool = False) -> Response
     return _redirect(f"{_link(session['id'])}?{urlencode({'msg': message})}")
 
 
+def _issue(conn: sqlite3.Connection, id: str) -> Response:
+    """Put the session on the control channel, and go to it. A link, again."""
+    session = query.get(conn, id)
+    if session is None:
+        return _error(404, f"No single session matches {id!r}.")
+    try:
+        opened = attend.issue_for(control(), session)
+    except (channel.NoToken, httpx.HTTPError) as e:
+        return _error(502, str(e))
+    return _redirect(opened.url)
+
+
+def control() -> attend.Control:
+    """The channel to reach, named here so a page can be tested without one."""
+    return channel.Channel()
+
+
 def _sync(conn: sqlite3.Connection) -> Response:
     result = index.sync(conn)
     return _redirect(
@@ -398,15 +417,16 @@ def _page_link(params: dict[str, str], page: int, label: str) -> str:
 
 
 def _actions(id: str) -> str:
-    """Two per row, out of the way until the row is the one being read.
+    """Where to pick the session up, out of the way until the row is being read.
 
-    `here` opens a pane on this machine; `phone` puts the session on the agent's
-    own remote control and sends the browser after it, which is the only way to
-    pick an old session up from somewhere that is not this keyboard.
+    Named for the place the conversation lands, which is the only thing that
+    differs between them. Not `local` and `remote`: there are two different
+    remotes now — the agent's own remote control, and the control channel — and
+    a word that means either means neither.
     """
     return (
-        f"<a class=resume href='{_resume_link(id)}'>here</a>"
-        f"<a class=resume href='{_resume_link(id, remote=True)}'>phone</a>"
+        f"<a class=resume href='{_resume_link(id)}'>terminal</a>"
+        f"<a class=resume href='/issue/{quote(id, safe=':')}'>issue</a>"
     )
 
 

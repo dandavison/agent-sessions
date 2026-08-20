@@ -23,6 +23,13 @@ class FakeChannel:
     posted: list[tuple[int, str]] = field(default_factory=list)
     taken: list[int] = field(default_factory=list)
     bodies: dict[int, str] = field(default_factory=dict)
+    titles: list[str] = field(default_factory=list)
+
+    def open(self, title: str, body: str) -> channel.Issue:
+        self.titles.append(title)
+        made = channel.Issue(number=100 + len(self.issues_), title=title, body=body, url="u")
+        self.issues_.append(made)
+        return made
 
     def issues(self) -> list[channel.Issue]:
         return self.issues_
@@ -175,3 +182,26 @@ def test_only_the_allowlisted_tools_are_offered(turns: list[dict], found) -> Non
 def test_the_allowlist_does_not_include_a_bare_bash(turns: list[dict], found) -> None:
     """`Bash` with no pattern is every command there is."""
     assert "Bash" not in attend.ALLOWED
+
+
+# --- opening the issue that makes a session reachable -------------------------
+
+
+def test_a_session_gets_one_issue_not_one_per_visit(turns: list[dict]) -> None:
+    """Asking twice is the normal case: the row is tapped whenever it is wanted."""
+    c = FakeChannel([issue()])
+    first = attend.issue_for(c, SESSION)
+    second = attend.issue_for(c, SESSION)
+    assert first.number == second.number == 4
+
+
+def test_a_session_with_no_issue_yet_gets_one(turns: list[dict]) -> None:
+    opened = FakeChannel([])
+    made = attend.issue_for(opened, SESSION)
+    assert made.session_id == "claude:7e90"
+
+
+def test_the_new_issue_is_titled_as_the_session_is(turns: list[dict]) -> None:
+    opened = FakeChannel([])
+    attend.issue_for(opened, SESSION | {"title": "why is conform relocating"})
+    assert opened.titles == ["why is conform relocating"]
