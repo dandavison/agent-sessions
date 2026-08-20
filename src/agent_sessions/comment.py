@@ -23,6 +23,15 @@ import orjson
 
 from agent_sessions.models import Block, Boundary, Ran, Said
 
+# Invisible once GitHub renders it, and what says a comment is not a prompt for
+# everything the loop posted before it had a bot of its own.
+MARKER = "<!-- agent-work:turn -->"
+
+# The comment a turn writes into while it runs, edited as the work lands and
+# finally replaced by the answer. Distinct from MARKER because a killed turn
+# leaves one behind, and a half-written progress note is not a reply.
+RUNNING = "<!-- agent-work:running -->"
+
 # What GitHub accepts in one comment. Truncation is not a nicety: a test run
 # clears this on its own and the post would simply fail.
 LIMIT = 65_536
@@ -103,6 +112,19 @@ def render(blocks: list[Block], summary: dict[str, Any] | None = None) -> str:
     # sits under every fold and has to be scrolled to on a phone.
     parts = [*said, *ran, _footer(summary)]
     return _fit(redact("\n\n".join(p for p in parts if p)))
+
+
+def working(prompt: str, blocks: list[Block] | None = None, elapsed: float = 0.0) -> str:
+    """The comment while the turn is still running, rewritten as the work lands.
+
+    Posted before the turn starts, so the thread shows something within seconds
+    of asking rather than nothing until it finishes. What is shown is only what
+    was run: the prose is left for the answer that replaces all of this.
+    """
+    ran = [f"- `{b.tool}` {_gist(b.input)}" for b in (blocks or []) if isinstance(b, Ran)]
+    took = f" · {elapsed:.0f}s" if elapsed else ""
+    doing = "\n".join(ran) or "*thinking…*"
+    return f"{RUNNING}\n<sub>working{took}</sub>\n\n{doing}\n"
 
 
 def body(session: dict[str, Any], prompts: list[str]) -> str:

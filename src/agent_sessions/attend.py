@@ -43,6 +43,10 @@ INTERVAL = 2.0
 POLL = 1.0
 HEARTBEAT = 20.0
 
+# How often the comment on the page is rewritten. An edit is a request, and a
+# request per block would be one a second.
+SHOW = 10.0
+
 # Long enough for an agent to put its affairs in order on SIGTERM.
 TAKEOVER_WAIT = 10.0
 
@@ -55,7 +59,8 @@ class Control(Protocol):
 
     def issues(self) -> list[channel.Issue]: ...
     def comments(self, number: int) -> list[channel.Comment]: ...
-    def post(self, number: int, body: str) -> None: ...
+    def post(self, number: int, body: str) -> int: ...
+    def edit(self, comment_id: int, body: str) -> None: ...
     def take_up(self, comment_id: int) -> None: ...
     def set_body(self, number: int, body: str) -> None: ...
     def open(self, title: str, body: str) -> channel.Issue: ...
@@ -130,20 +135,36 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
         displaced = _clear_the_way(session)
         log.say(f"#{issue.number} running {session['id']} in {session['cwd']}")
         started = time.monotonic()
+        # Before the turn, not after: the thread should show something within
+        # seconds of asking, and this is the comment the answer will replace.
+        note = control.post(issue.number, comment.working(prompt.body))
         # Held for the length of the turn, so a resume from the terminal is
         # refused rather than opening a second agent on the same transcript.
         with attending.holding(session["native_id"]):
-            blocks, summary = run_turn(session, prompt.body)
+            blocks, summary = run_turn(session, prompt.body, showing=_shown(control, note, started))
         log.say(
             f"#{issue.number} answered in {time.monotonic() - started:.0f}s"
             f" — {len(blocks)} blocks, ${summary.get('total_cost_usd', 0):.2f}"
         )
-        body = displaced + comment.render(blocks, summary)
-        control.post(issue.number, body)
+        body = channel.MARKER + "\n" + displaced + comment.render(blocks, summary)
+        control.edit(note, body)
         log.say(f"#{issue.number} posted {len(body):,} chars")
         answered += 1
     _restate(control, issue, session)
     return answered
+
+
+def _shown(control: Control, note: int, started: float) -> Callable[[list[Block]], None]:
+    """Write what has happened so far into the comment already on the page.
+
+    An edit does not notify, so this costs nothing but a request; the one
+    notification is the comment appearing when the turn began.
+    """
+
+    def show(blocks: list[Block]) -> None:
+        control.edit(note, comment.working("", blocks, time.monotonic() - started))
+
+    return show
 
 
 def unanswered(comments: list[channel.Comment]) -> list[channel.Comment]:
@@ -159,7 +180,8 @@ def unanswered(comments: list[channel.Comment]) -> list[channel.Comment]:
     for i, mine in enumerate(comments):
         if mine.is_ours:
             continue
-        if not next((c.is_ours for c in comments[i + 1 :]), False):
+        following = next((c for c in comments[i + 1 :]), None)
+        if not (following and following.is_ours and not following.is_progress):
             out.append(mine)
     return out
 
@@ -212,7 +234,9 @@ def lookup(conn: Any, session_id: str) -> dict[str, Any] | None:
     return query.get(conn, session_id)
 
 
-def run_turn(session: dict[str, Any], prompt: str) -> tuple[list[Block], dict[str, Any]]:
+def run_turn(
+    session: dict[str, Any], prompt: str, showing: Callable[[list[Block]], None] | None = None
+) -> tuple[list[Block], dict[str, Any]]:
     """One headless turn, in the directory the session was had in.
 
     A turn appends to the session's own transcript, so what it said is read
@@ -228,13 +252,18 @@ def run_turn(session: dict[str, Any], prompt: str) -> tuple[list[Block], dict[st
         cwd=session["cwd"],
         prompt=prompt,
         watching=lambda: source.blocks(path, since=before),
+        showing=showing,
     )
     blocks = source.blocks(path, since=before)
     return (blocks or [_failed(done)]), _summary(done.stdout)
 
 
 def _spawn(
-    argv: list[str], cwd: str, prompt: str, watching: Callable[[], list[Block]]
+    argv: list[str],
+    cwd: str,
+    prompt: str,
+    watching: Callable[[], list[Block]],
+    showing: Callable[[list[Block]], None] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run the turn, saying what it does while it does it.
 
@@ -258,7 +287,7 @@ def _spawn(
 
     worker = Thread(target=talk, daemon=True)
     worker.start()
-    watch(watching, alive=worker.is_alive)
+    watch(watching, alive=worker.is_alive, showing=showing)
     worker.join(TIMEOUT)
     if worker.is_alive():
         proc.kill()
@@ -269,22 +298,33 @@ def _spawn(
     )
 
 
-def watch(blocks: Callable[[], list[Block]], alive: Callable[[], bool]) -> None:
+def watch(
+    blocks: Callable[[], list[Block]],
+    alive: Callable[[], bool],
+    showing: Callable[[list[Block]], None] | None = None,
+) -> None:
     """Report what the turn has done so far, until it stops running.
 
     Said as it lands rather than at the end, because the question while waiting
-    is always whether the thing is still moving.
+    is always whether the thing is still moving. `showing` puts the same thing
+    where I am actually looking, which is not this terminal; it is throttled
+    because a request per block would be a request per second.
     """
     reported = 0
     quiet = time.monotonic()
+    told = 0.0
     while alive():
-        for block in blocks()[reported:]:
+        seen = blocks()
+        for block in seen[reported:]:
             log.say(f"  {_progress(block)}")
             reported += 1
             quiet = time.monotonic()
         if time.monotonic() - quiet >= HEARTBEAT:
             log.say(f"  still going ({reported} so far)")
             quiet = time.monotonic()
+        if showing and time.monotonic() - told >= SHOW:
+            showing(seen)
+            told = time.monotonic()
         time.sleep(POLL)
 
 

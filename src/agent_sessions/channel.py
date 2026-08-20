@@ -36,12 +36,11 @@ import jwt
 
 from agent_sessions import comment, log
 
+# Comment-body syntax, so they are defined where comments are written.
+from agent_sessions.comment import MARKER, RUNNING
+
 API = "https://api.github.com"
 REPO = os.environ.get("AGENT_WORK_REPO", "dandavison/agent-work")
-
-# Invisible once GitHub renders it, and the only thing that says a comment is
-# not a prompt.
-MARKER = "<!-- agent-work:turn -->"
 
 # Posted the moment a prompt is picked up, so that a turn taking minutes still
 # shows something within seconds of asking for it.
@@ -88,7 +87,12 @@ class Comment:
         posted back when this ran as me — without it, a repo full of those
         becomes a queue of prompts the moment the app is turned on.
         """
-        return self.author.endswith("[bot]") or MARKER in self.body
+        return self.author.endswith("[bot]") or MARKER in self.body or self.is_progress
+
+    @property
+    def is_progress(self) -> bool:
+        """A turn still writing into this, or one that died while it was."""
+        return RUNNING in self.body
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,11 +137,14 @@ class Channel:
 
     # --- writing ------------------------------------------------------------
 
-    def post(self, number: int, body: str) -> None:
-        """Everything posted carries the marker. Nothing else keeps the loop finite."""
-        self._send(
-            "POST", f"/repos/{self.repo}/issues/{number}/comments", {"body": f"{MARKER}\n{body}"}
-        )
+    def post(self, number: int, body: str) -> int:
+        """Post a comment and say which one it is, so it can be written into."""
+        made = self._send("POST", f"/repos/{self.repo}/issues/{number}/comments", {"body": body})
+        return int(made["id"])
+
+    def edit(self, comment_id: int, body: str) -> None:
+        """Rewrite a comment. Edits do not notify, which is what makes progress bearable."""
+        self._send("PATCH", f"/repos/{self.repo}/issues/comments/{comment_id}", {"body": body})
 
     def take_up(self, comment_id: int) -> None:
         self._send(

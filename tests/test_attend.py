@@ -75,7 +75,7 @@ def turns(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     """What the agent was asked to do, without asking it."""
     ran: list[dict] = []
 
-    def fake(session: dict, text: str) -> tuple[list[Said], dict]:
+    def fake(session: dict, text: str, showing=None) -> tuple[list[Said], dict]:
         ran.append({"session": session["id"], "prompt": text})
         return [Said(role="assistant", text="Done.")], {}
 
@@ -99,11 +99,11 @@ def test_a_comment_of_mine_is_a_prompt(turns: list[dict], found) -> None:
 
 
 def test_the_answer_goes_back_to_the_issue_it_came_from(turns: list[dict], found) -> None:
+    """It lands in the comment posted when the turn began, not a new one."""
     c = FakeChannel([issue()], {4: [prompt()]})
     attend.once(c, conn=None)
-    number, body = c.posted[0]
-    assert number == 4
-    assert "Done." in body
+    assert c.posted[0][0] == 4
+    assert "Done." in c.edited[-1][1]
 
 
 def test_a_prompt_is_taken_up_before_it_is_run(turns: list[dict], found) -> None:
@@ -177,7 +177,7 @@ def test_taking_a_session_over_is_said_in_the_thread(
     monkeypatch.setattr(attend, "take_over", lambda pid: None)
     c = FakeChannel([issue()], {4: [prompt()]})
     attend.once(c, conn=None)
-    assert "terminal" in c.posted[0][1].lower()
+    assert "terminal" in c.edited[-1][1].lower()
 
 
 def test_an_issue_naming_no_session_is_said_to_be_wrong(turns: list[dict], found) -> None:
@@ -379,6 +379,13 @@ def test_the_answer_replaces_that_comment_rather_than_adding_one(turns: list[dic
     assert len(c.posted) == 1
     assert "Done." in c.edited[-1][1]
     assert channel.RUNNING not in c.edited[-1][1]
+
+
+def test_the_finished_comment_carries_the_marker(turns: list[dict], found) -> None:
+    """Nothing else keeps the loop finite for comments the bot did not author."""
+    c = FakeChannel([issue()], {4: [prompt()]})
+    attend.once(c, conn=None)
+    assert c.edited[-1][1].startswith(channel.MARKER)
 
 
 def test_a_stale_progress_comment_does_not_count_as_an_answer(turns: list[dict], found) -> None:

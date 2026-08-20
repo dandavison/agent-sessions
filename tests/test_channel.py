@@ -138,10 +138,11 @@ def test_a_prompt_already_taken_up_is_not_taken_up_again() -> None:
 # --- writing -----------------------------------------------------------------
 
 
-def test_a_posted_turn_carries_the_marker() -> None:
+def test_what_is_posted_is_posted_verbatim() -> None:
+    """Which marker a comment carries is the caller's, now that there are two."""
     seen: list[httpx.Request] = []
     c = channel_over({"POST /repos/dandavison/agent-work/issues/4/comments": {"id": 13}}, seen)
-    c.post(4, "Done.")
+    c.post(4, f"{channel.MARKER}\nDone.")
     assert channel.MARKER in seen[-1].content.decode()
 
 
