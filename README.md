@@ -67,10 +67,21 @@ A turn appends to the session's own transcript, so `sync`, `search`, `show` and
 open in a pane at home is taken over: two agents on one transcript fork it and
 then fight over which branch is live, and I am not at that keyboard.
 
-`<!-- agent-work:turn -->` marks what the loop wrote, and 👀 marks a prompt it
-has taken up. Both live on GitHub, not in the index: comments are posted with
-my own token so the author distinguishes nothing, and the index is safe to
-delete — losing it must not make the loop read its own output back as prompts.
+`agent-work[bot]` is what the loop posts as, `<!-- agent-work:turn -->` marks
+what it wrote before there was a bot, and 👀 marks a prompt it has taken up.
+All of it lives on GitHub, not in the index, which is safe to delete — losing
+it must not make the loop read its own output back as prompts.
+
+Who posts is not cosmetic. As me, a reply was my own activity and GitHub does
+not notify you about that, so the answer landing was silent and reloading the
+page was the only way to see it. Set these and the loop is the app instead:
+
+    export AGENT_WORK_APP_ID=...          # the app's id
+    export AGENT_WORK_APP_KEY=~/.agent-sessions/agent-work.pem
+
+Create a GitHub App under your own account with **Issues: read & write** and no
+webhook, generate a private key, and install it on the control repo alone.
+Unset, the token is whatever `gh` is signed in as, and nothing notifies.
 
 GitHub has no long-poll, but a conditional request that has not changed costs
 nothing against the rate limit, so the interval is a free choice.
