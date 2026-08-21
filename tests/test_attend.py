@@ -513,3 +513,22 @@ def test_the_answer_records_the_point_it_can_be_rewound_to(turns: list[dict], fo
     c = FakeChannel([issue()], {4: [prompt()]})
     attend.once(c, conn=None)
     assert comment.point(c.edited[-1][1]) == "leafbefore"
+
+
+def test_prompts_that_piled_up_are_answered_oldest_first(turns: list[dict], found) -> None:
+    """Answers do not always land next to their prompt, and adjacency is not the rule.
+
+    While the loop was down I posted three prompts in a row. Requiring the very
+    next comment to be a reply left all three permanently unanswered, because
+    the replies arrived later and at the end. The loop takes prompts oldest
+    first and posts one reply each, so N replies means the first N are done.
+    """
+    reply = channel.Comment(id=99, body=f"{channel.MARKER}\nDone.", author="a[bot]")
+    piled = [prompt(11, "first"), prompt(12, "second"), prompt(13, "third"), reply]
+    assert [c.body for c in attend.unanswered(piled)] == ["second", "third"]
+
+
+def test_a_stale_progress_comment_is_not_one_of_those_replies(turns: list[dict], found) -> None:
+    running = channel.Comment(id=99, body=f"{channel.RUNNING}\nworking…", author="a[bot]")
+    piled = [prompt(11, "first"), running]
+    assert [c.body for c in attend.unanswered(piled)] == ["first"]

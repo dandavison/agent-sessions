@@ -218,22 +218,20 @@ def reindex(conn: Any) -> None:
 
 
 def unanswered(comments: list[channel.Comment]) -> list[channel.Comment]:
-    """My comments that the loop has not replied to yet.
+    """My prompts that the loop has not replied to yet.
 
-    The eyes cannot decide this: they go on before the turn starts, so they say
-    started, not answered. A restart mid-turn left a prompt with eyes, no reply,
-    and no prospect of either. What settles it is whether a reply follows — the
-    very next comment, not merely some later one, or an answered prompt would
-    look unanswered again the moment a newer one arrived.
+    Counted, not paired by position. Answers do not always land beside their
+    prompt — while the loop was down three of mine piled up and the replies
+    arrived later, at the end — and requiring the next comment to be a reply
+    left all three unanswerable for ever. Prompts are taken oldest first and
+    get one reply each, so N replies means the first N are done.
+
+    Progress comments are not replies: a killed turn leaves one behind, and it
+    would otherwise cover a prompt that never got an answer.
     """
-    out = []
-    for i, mine in enumerate(comments):
-        if mine.is_ours:
-            continue
-        following = next((c for c in comments[i + 1 :]), None)
-        if not (following and following.is_ours and not following.is_progress):
-            out.append(mine)
-    return out
+    mine = [c for c in comments if not c.is_ours]
+    replied = sum(1 for c in comments if c.is_ours and not c.is_progress)
+    return mine[replied:]
 
 
 def _clear_the_way(session: dict[str, Any]) -> str:
