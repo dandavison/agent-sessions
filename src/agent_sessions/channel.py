@@ -133,10 +133,27 @@ class Channel:
     client: httpx.Client | None = None
     _etags: dict[str, str] = field(default_factory=dict, init=False)
     _cached: dict[str, list[dict[str, Any]]] = field(default_factory=dict, init=False)
+    _mine: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         if self.client is None:
-            self.client = httpx.Client(base_url=API, headers=_headers(), timeout=30.0)
+            self.client = httpx.Client(base_url=API, timeout=30.0)
+            self._mine = True
+
+    def _authorize(self) -> None:
+        """Put the current token on the client, before every request that needs one.
+
+        An installation token lasts an hour and this process does not. Set once
+        at construction it was still the startup token sixty minutes later, and
+        the loop then 401ed for ever. `token()` caches, so asking each time
+        costs a comparison and refreshes itself when the cache goes stale.
+
+        A client I was handed brings its own authorization; the tests rely on
+        that, and so would anything else supplying one.
+        """
+        if self._mine:
+            assert self.client is not None
+            self.client.headers.update(_headers())
 
     # --- reading ------------------------------------------------------------
 
@@ -185,6 +202,7 @@ class Channel:
     def _poll(self, path: str, params: dict[str, str]) -> list[dict[str, Any]]:
         """A conditional GET. A 304 means unchanged, which is not the same as empty."""
         assert self.client is not None
+        self._authorize()
         headers = {"If-None-Match": tag} if (tag := self._etags.get(path)) else {}
         response = self.client.get(path, params=params, headers=headers)
         log.detail(f"GET {path} -> {response.status_code}")
@@ -198,6 +216,7 @@ class Channel:
 
     def _send(self, method: str, path: str, payload: dict[str, str]) -> dict[str, Any]:
         assert self.client is not None
+        self._authorize()
         response = self.client.request(method, path, json=payload)
         log.detail(f"{method} {path} -> {response.status_code}")
         response.raise_for_status()
