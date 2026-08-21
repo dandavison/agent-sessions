@@ -356,3 +356,32 @@ def test_a_prompt_quoting_the_turn_marker_is_still_my_prompt() -> None:
 def test_a_real_progress_comment_is_still_progress() -> None:
     running = channel.Comment(id=13, body=f"{channel.RUNNING}\nworking…", author="a[bot]")
     assert running.is_progress
+
+
+# --- a token that outlives its hour -------------------------------------------
+
+
+def test_the_token_is_refreshed_rather_than_bound_once(monkeypatch) -> None:
+    """An installation token lasts an hour and the server does not.
+
+    It was read once and baked into the client's default headers, so the
+    45-minute refresh was never consulted and every request after sixty minutes
+    came back 401 for ever.
+    """
+    minted = iter(["one", "two"])
+    monkeypatch.setattr(channel, "_headers", lambda: {"Authorization": f"Bearer {next(minted)}"})
+    c = channel.Channel(repo="dandavison/agent-work")
+    c._authorize()
+    assert c.client is not None
+    assert c.client.headers["Authorization"] == "Bearer one"
+    c._authorize()
+    assert c.client.headers["Authorization"] == "Bearer two"
+
+
+def test_a_client_i_was_given_is_not_re_authorized(monkeypatch) -> None:
+    """Supplying a client means supplying its auth; the tests rely on that."""
+    monkeypatch.setattr(channel, "_headers", lambda: {"Authorization": "Bearer mine"})
+    given = httpx.Client(base_url="https://api.github.com")
+    c = channel.Channel(repo="dandavison/agent-work", client=given)
+    c._authorize()
+    assert "Authorization" not in given.headers
