@@ -27,6 +27,7 @@ class FakeChannel:
     titles: list[str] = field(default_factory=list)
     deleted: list[int] = field(default_factory=list)
     done: list[int] = field(default_factory=list)
+    fresh: bool = False
 
     def open(self, title: str, body: str) -> channel.Issue:
         self.titles.append(title)
@@ -957,3 +958,37 @@ def test_the_answer_arrives_as_a_new_comment(turns: list[dict], found, monkeypat
     attend.once(c, conn=None)
     assert any("four" in body for _, body in c.posted), "the answer was posted"
     assert not any("four" in body for _, body in c.edited), "not edited into the note"
+
+
+def test_a_quiet_channel_is_polled_less_and_a_busy_one_at_once(
+    turns: list[dict], found, monkeypatch, tmp_path
+) -> None:
+    """A request a second for hours against someone else's repo is not polite.
+
+    The 304s are free, so this is not about budget. It costs latency only on
+    the first prompt after a lull, which is the trade worth making: while a
+    conversation is going the channel answers as fast as it ever did.
+    """
+    monkeypatch.setattr(attend.attending, "LOCK", tmp_path / "attending.pid")
+    slept: list[float] = []
+    monkeypatch.setattr(attend.time, "sleep", lambda s: slept.append(s) or _stop(len(slept)))
+    monkeypatch.setattr(attend, "QUIETEST", 8.0)
+    c = FakeChannel([issue()], {4: []})
+    with pytest.raises(_Enough):
+        attend.loop(c, conn=None, interval=1.0)
+    assert slept == [2.0, 4.0, 8.0, 8.0], f"doubling out to the ceiling, got {slept}"
+
+    slept.clear()
+    c = FakeChannel([issue()], {4: [prompt()]})
+    with pytest.raises(_Enough):
+        attend.loop(c, conn=None, interval=1.0)
+    assert slept[0] == 1.0, "a prompt answered means poll again at once"
+
+
+class _Enough(Exception):
+    """The loop does not end on its own; this is how a test gets out of it."""
+
+
+def _stop(n: int) -> None:
+    if n >= 4:
+        raise _Enough

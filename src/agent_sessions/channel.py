@@ -160,6 +160,9 @@ class Channel:
 
     repo: str = REPO
     client: httpx.Client | None = None
+    # Whether the last poll found anything GitHub had not already told us. A
+    # 304 leaves this alone, which is what makes it the signal to slow down on.
+    fresh: bool = field(default=False, init=False)
     _etags: dict[str, str] = field(default_factory=dict, init=False)
     _cached: dict[str, list[dict[str, Any]]] = field(default_factory=dict, init=False)
     _mine: bool = field(default=False, init=False)
@@ -307,6 +310,9 @@ class Channel:
         if response.status_code == 304:
             return self._cached.get(cache, [])
         response.raise_for_status()
+        # Something on GitHub is not what we last saw. The poll interval is
+        # decided on this, so it is recorded rather than inferred.
+        self.fresh = True
         if tag := response.headers.get("ETag"):
             self._etags[cache] = tag
         self._cached[cache] = response.json()

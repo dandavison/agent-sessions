@@ -49,7 +49,13 @@ MOST = 20
 # than once a second.
 _settled: dict[int, str] = {}
 
+# A quiet channel is polled slowly and a busy one quickly, doubling out to the
+# ceiling and snapping back the moment GitHub returns anything but a 304. The
+# 304s are free, so this is politeness rather than budget: a request a second
+# for hours against someone else's repo is not a good citizen, and the interval
+# only ever costs latency on the first prompt after a lull.
 INTERVAL = 1.0
+QUIETEST = 16.0
 
 # How often the transcript is looked at while a turn runs, and how long it may
 # say nothing before saying that it is alive.
@@ -81,6 +87,9 @@ class Control(Protocol):
     def set_body(self, number: int, body: str) -> None: ...
     def open(self, title: str, body: str) -> channel.Issue: ...
 
+    # Whether the last requests found anything GitHub had not already told us.
+    fresh: bool
+
 
 def issue_for(control: Control, session: dict[str, Any]) -> channel.Issue:
     """The issue that makes this session reachable from a phone, opening one if needed.
@@ -106,10 +115,15 @@ def loop(control: Control, conn: Any, interval: float = INTERVAL) -> None:
     """Attend the channel until interrupted, and take nothing with us on the way out."""
     with attending.only_one():
         atexit.register(stop_children)
+        waiting = interval
         try:
             while True:
-                a_pass(control, conn)
-                time.sleep(interval)
+                control.fresh = False
+                stirred = a_pass(control, conn) or control.fresh
+                was, waiting = waiting, interval if stirred else min(QUIETEST, waiting * 2)
+                if waiting != was:
+                    log.detail(f"polling every {waiting:.0f}s")
+                time.sleep(waiting)
         finally:
             stop_children()
 
