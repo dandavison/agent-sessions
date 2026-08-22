@@ -487,3 +487,32 @@ def test_one_issue_can_be_fetched_without_the_list() -> None:
     """
     c = channel_over({"GET /repos/dandavison/agent-work/issues/4": ISSUE})
     assert c.issue(4).session_id == "claude:7e90"
+
+
+def test_our_own_writes_make_our_cached_reads_stale() -> None:
+    """After writing, a 304 is a claim we have no business believing.
+
+    The conditional cache is what makes polling free; it is also an assertion
+    that nothing has changed. Having just changed something ourselves, waiting
+    for a third party's cache to agree is how a turn's answer went unseen and
+    was posted a second time.
+    """
+    state = {"comments": [MINE], "etag": '"stale"'}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "PATCH":
+            state["comments"] = [MINE, OURS]
+            return httpx.Response(200, json={"id": 12})
+        if request.headers.get("if-none-match") == state["etag"]:
+            return httpx.Response(304, headers={"ETag": state["etag"]})
+        return httpx.Response(200, json=state["comments"], headers={"ETag": state["etag"]})
+
+    c = channel.Channel(
+        repo="dandavison/agent-work",
+        client=httpx.Client(
+            transport=httpx.MockTransport(handle), base_url="https://api.github.com"
+        ),
+    )
+    assert len(c.comments(4)) == 1
+    c.edit(11, "rewritten")
+    assert len(c.comments(4)) == 2, "the edge is still serving the old etag; we know better"
