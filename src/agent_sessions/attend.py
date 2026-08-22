@@ -137,11 +137,17 @@ def once(control: Control, conn: Any) -> int:
 def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
     if _rewind(control, conn, issue):
         return 0
-    waiting = unanswered(control.comments(issue.number))
+    session = lookup(conn, issue.session_id)
+    blocks = (
+        index.SOURCES[session["agent"]].blocks(Path(session["path"]), since=window(issue))
+        if session
+        else []
+    )
+    waiting = pending(control.comments(issue.number), blocks)
     if not waiting:
+        reconcile(control, issue, session)
         return 0
     log.say(f"#{issue.number} {len(waiting)} waiting")
-    session = lookup(conn, issue.session_id)
     answered = 0
     for prompt in waiting:
         log.say(f"#{issue.number} picked up: {_oneline(prompt.body)}")
@@ -184,6 +190,7 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
         control.edit(note, body)
         log.say(f"#{issue.number} posted {len(body):,} chars")
         answered += 1
+    reconcile(control, issue, session)
     _restate(control, issue, session)
     return answered
 
@@ -288,21 +295,29 @@ def window(issue: channel.Issue) -> str:
     return comment.frontmatter(issue.body).get("from", "")
 
 
-def unanswered(comments: list[channel.Comment]) -> list[channel.Comment]:
-    """My prompts that the loop has not replied to yet.
+def pending(comments: list[channel.Comment], blocks: list[Block]) -> list[channel.Comment]:
+    """My comments that the session has not taken in yet.
 
-    Counted, not paired by position. Answers do not always land beside their
-    prompt — while the loop was down three of mine piled up and the replies
-    arrived later, at the end — and requiring the next comment to be a reply
-    left all three unanswerable for ever. Prompts are taken oldest first and
-    get one reply each, so N replies means the first N are done.
+    Asked of the transcript, not of the thread. A turn writes my prompt into
+    the session as it starts, so the session already knows what it has
+    consumed; inferring that from the shape of the thread is what desynced.
 
-    Progress comments are not replies: a killed turn leaves one behind, and it
-    would otherwise cover a prompt that never got an answer.
+    A rendering that names the comment it answered settles it too, for the case
+    where the text does not match exactly. Two reasons, because running a
+    prompt twice is the only thing here that cannot be taken back.
     """
-    mine = [c for c in comments if not c.is_ours]
-    replied = sum(1 for c in comments if c.is_ours and not c.is_progress)
-    return mine[replied:]
+    taken_in = {_plain(b.text) for b in blocks if isinstance(b, Said) and b.role == "user"}
+    claimed = {comment.asked_by(c.body) for c in comments if c.is_ours}
+    return [
+        c
+        for c in comments
+        if not c.is_ours and _plain(c.body) not in taken_in and c.id not in claimed
+    ]
+
+
+def _plain(text: str) -> str:
+    """Whitespace is not meaning, and a comment box and a transcript disagree about it."""
+    return " ".join(text.split())
 
 
 def _cut_off_note(cut_off: bool) -> str:

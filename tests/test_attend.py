@@ -356,22 +356,12 @@ def test_a_prompt_whose_turn_never_finished_is_picked_up_again(turns: list[dict]
     assert turns[0]["prompt"] == "the one that was cut off"
 
 
-def test_a_prompt_that_was_answered_is_left_alone(turns: list[dict], found) -> None:
-    answered = prompt(11, "already done", taken=True)
-    reply = channel.Comment(id=12, body=f"{channel.MARKER}\nDone.", author="dandavison-agent[bot]")
-    c = FakeChannel([issue()], {4: [answered, reply]})
+def test_a_prompt_that_was_answered_is_left_alone(turns: list[dict], found, monkeypatch) -> None:
+    """Settled by the session having taken it in, not by a reply sitting near it."""
+    transcript(monkeypatch, said_by_me("already done", "u1"), Said("assistant", "Done."))
+    c = FakeChannel([issue()], {4: [prompt(11, "already done", taken=True)]})
     attend.once(c, conn=None)
     assert turns == []
-
-
-def test_an_older_prompts_answer_does_not_count_for_a_newer_one(turns: list[dict], found) -> None:
-    """Answered means answered next, not answered at some point afterwards."""
-    first = prompt(11, "first", taken=True)
-    reply = channel.Comment(id=12, body=f"{channel.MARKER}\nDone.", author="agent[bot]")
-    second = prompt(13, "second", taken=True)
-    c = FakeChannel([issue()], {4: [first, reply, second]})
-    attend.once(c, conn=None)
-    assert [t["prompt"] for t in turns] == ["second"]
 
 
 # --- progress where I am actually looking ------------------------------------
@@ -515,23 +505,27 @@ def test_the_answer_records_the_point_it_can_be_rewound_to(turns: list[dict], fo
     assert comment.point(c.edited[-1][1]) == "leafbefore"
 
 
-def test_prompts_that_piled_up_are_answered_oldest_first(turns: list[dict], found) -> None:
-    """Answers do not always land next to their prompt, and adjacency is not the rule.
+def test_prompts_that_piled_up_are_all_still_waiting(turns: list[dict], found) -> None:
+    """Three in a row while the loop was down, and the session has none of them.
 
-    While the loop was down I posted three prompts in a row. Requiring the very
-    next comment to be a reply left all three permanently unanswered, because
-    the replies arrived later and at the end. The loop takes prompts oldest
-    first and posts one reply each, so N replies means the first N are done.
+    This used to be decided by counting replies in the thread, which needed the
+    replies to arrive in step with the prompts and broke when they did not. The
+    session knows what it has taken in.
     """
-    reply = channel.Comment(id=99, body=f"{channel.MARKER}\nDone.", author="a[bot]")
-    piled = [prompt(11, "first"), prompt(12, "second"), prompt(13, "third"), reply]
-    assert [c.body for c in attend.unanswered(piled)] == ["second", "third"]
+    piled = [prompt(11, "first"), prompt(12, "second"), prompt(13, "third")]
+    assert [c.body for c in attend.pending(piled, [])] == ["first", "second", "third"]
 
 
-def test_a_stale_progress_comment_is_not_one_of_those_replies(turns: list[dict], found) -> None:
+def test_one_the_session_has_taken_in_is_no_longer_waiting(turns: list[dict], found) -> None:
+    piled = [prompt(11, "first"), prompt(12, "second")]
+    taken: list[Block] = [Said(role="user", text="first", uuid="u1")]
+    assert [c.body for c in attend.pending(piled, taken)] == ["second"]
+
+
+def test_a_stale_progress_comment_settles_nothing(turns: list[dict], found) -> None:
+    """What a killed turn leaves. It is not a rendering, and it claims no prompt."""
     running = channel.Comment(id=99, body=f"{channel.RUNNING}\nworking…", author="a[bot]")
-    piled = [prompt(11, "first"), running]
-    assert [c.body for c in attend.unanswered(piled)] == ["first"]
+    assert [c.body for c in attend.pending([prompt(11, "first"), running], [])] == ["first"]
 
 
 # --- what survives a crash ----------------------------------------------------
