@@ -497,15 +497,16 @@ def test_our_own_writes_make_our_cached_reads_stale() -> None:
     for a third party's cache to agree is how a turn's answer went unseen and
     was posted a second time.
     """
-    state = {"comments": [MINE], "etag": '"stale"'}
+    comments: list[dict[str, object]] = [MINE]
+    etag = '"stale"'
 
     def handle(request: httpx.Request) -> httpx.Response:
         if request.method == "PATCH":
-            state["comments"] = [MINE, OURS]
+            comments.append(OURS)
             return httpx.Response(200, json={"id": 12})
-        if request.headers.get("if-none-match") == state["etag"]:
-            return httpx.Response(304, headers={"ETag": state["etag"]})
-        return httpx.Response(200, json=state["comments"], headers={"ETag": state["etag"]})
+        if request.headers.get("if-none-match") == etag:
+            return httpx.Response(304, headers={"ETag": etag})
+        return httpx.Response(200, json=comments, headers={"ETag": etag})
 
     c = channel.Channel(
         repo="dandavison/agent-work",

@@ -311,6 +311,10 @@ class Channel:
         if _refuses(response):
             raise NotAuthorized(f"GitHub refused us: {response.status_code} on {path}")
         response.raise_for_status()
+        # We changed something, so what we have cached is stale by definition.
+        # Waiting for GitHub's ETag to agree is waiting on someone else's edge.
+        self._etags.clear()
+        self._cached.clear()
         return response.json() if response.content else {}
 
 
