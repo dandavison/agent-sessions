@@ -45,6 +45,10 @@ _children: set[subprocess.Popen[str]] = set()
 # ones say nothing, and a whole session is neither readable nor cheap.
 MOST = 20
 
+# What each issue last reconciled to, so "nothing changed" is said once rather
+# than once a second.
+_settled: dict[int, str] = {}
+
 INTERVAL = 1.0
 
 # How often the transcript is looked at while a turn runs, and how long it may
@@ -153,10 +157,14 @@ def once(control: Control, conn: Any, only: int | None = None) -> int:
 
 
 def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
-    if _rewind(control, conn, issue):
+    # Read once. Rewind, pending and reconcile each used to ask GitHub for the
+    # same thread, so a quiet pass cost three requests per issue and printed
+    # three lines saying nothing changed.
+    comments = control.comments(issue.number)
+    if _rewind(control, conn, issue, comments):
         return 0
     session = lookup(conn, issue.session_id)
-    waiting = pending(control.comments(issue.number), _seen(session))
+    waiting = pending(comments, _seen(session))
     if waiting and session is None:
         # One fact about the issue, so it is said once. Said per prompt, a
         # stale index turns into a thread full of the same sentence.
@@ -168,7 +176,7 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
         )
         return 0
     if not waiting:
-        reconcile(control, issue, session)
+        reconcile(control, issue, session, comments)
         return 0
     log.say(f"#{issue.number} {len(waiting)} waiting")
     answered = 0
@@ -240,7 +248,9 @@ def _shown(control: Control, note: int, started: float, tag: str) -> Callable[[l
     return show
 
 
-def _rewind(control: Control, conn: Any, issue: channel.Issue) -> bool:
+def _rewind(
+    control: Control, conn: Any, issue: channel.Issue, comments: list[channel.Comment] | None = None
+) -> bool:
     """Put the session back the way it was before whichever exchange I thumbed down.
 
     A tap on my prompt and a tap on the answer to it mean the same thing, so
@@ -248,7 +258,7 @@ def _rewind(control: Control, conn: Any, issue: channel.Issue) -> bool:
     fork writes a new session and leaves the old one whole, which is why the
     thread can drop what was rewound over — the transcript still has it.
     """
-    comments = control.comments(issue.number)
+    comments = control.comments(issue.number) if comments is None else comments
     asked = next((i for i, c in enumerate(comments) if c.rewind_wanted), None)
     if asked is None:
         return False
@@ -283,7 +293,12 @@ def reindex(conn: Any) -> None:
     index.sync(conn)
 
 
-def reconcile(control: Control, issue: channel.Issue, session: dict[str, Any] | None) -> None:
+def reconcile(
+    control: Control,
+    issue: channel.Issue,
+    session: dict[str, Any] | None,
+    comments: list[channel.Comment] | None = None,
+) -> None:
     """Make the thread show the session, rather than whatever got posted.
 
     The thread was accumulated: the loop appended as it went, and every state
@@ -299,7 +314,7 @@ def reconcile(control: Control, issue: channel.Issue, session: dict[str, Any] | 
     if session is None:
         return
     blocks = index.SOURCES[session["agent"]].blocks(Path(session["path"]), since=window(issue))
-    comments = control.comments(issue.number)
+    comments = control.comments(issue.number) if comments is None else comments
     have = {comment.turn_key(c.body): c for c in comments if c.is_ours and comment.turn_key(c.body)}
     # Carrying over what only the thread knew — which comment asked, where to
     # rewind to. Re-rendered from the transcript alone they would be dropped on
@@ -335,8 +350,11 @@ def reconcile(control: Control, issue: channel.Issue, session: dict[str, Any] | 
             f"{at}: {len(want)} turns wanted, {len(have)} had"
             f" — {made} posted, {changed} rewritten, {gone} deleted"
         )
-    else:
+    elif _settled.get(issue.number) != at:
+        # Once, when it becomes true. Said every pass it buried the lines that
+        # meant something under a line that meant nothing changed.
         log.detail(f"{at}: settled, {len(want)} turns")
+    _settled[issue.number] = "" if (made or changed or gone) else at
 
 
 def window(issue: channel.Issue) -> str:
