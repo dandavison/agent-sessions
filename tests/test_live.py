@@ -192,3 +192,30 @@ def _assistant(uuid: str, parent: str, text: str) -> dict:
 
 def _said(blocks) -> list[str]:
     return [b.text for b in blocks if isinstance(b, Said)]
+
+
+def test_a_prompt_answered_before_a_compaction_is_not_run_again(scratch, live, monkeypatch) -> None:
+    """The one that replayed nine answered prompts, against a real issue.
+
+    A compaction writes a boundary whose `parentUuid` is null, so it starts a
+    new root. Consumption was read by walking back from the leaf, which stops
+    dead at that boundary — every prompt the session had already taken in fell
+    out of view and re-armed. This session had answered forty-nine of them.
+    """
+    control, issue, me = live
+    path = Path(scratch["path"])
+    already = "what did we decide about the retry policy?"
+    _append(path, _user("u5", "a0", already))
+    _append(path, _assistant("a5", "u5", "we decided to keep it"))
+    _append(
+        path, {"type": "system", "subtype": "compact_boundary", "uuid": "cb", "parentUuid": None}
+    )
+    _append(path, _user("u6", "cb", "carry on"))
+    _append(path, _assistant("a6", "u6", "carrying on"))
+
+    ran: list[str] = []
+    monkeypatch.setattr(attend, "run_turn", lambda *a, **k: ran.append(a[1]) or ([], {}, ""))
+    me.post(issue.number, already)
+    attend.once(control, conn=None, only=issue.number)
+
+    assert ran == [], f"already answered before the compaction, but ran {ran}"
