@@ -907,3 +907,19 @@ def test_restating_the_body_keeps_the_window(turns: list[dict], found, monkeypat
     c = FakeChannel([windowed], {4: [prompt(11, "a question")]})
     attend.once(c, conn=None)
     assert comment.frontmatter(c.bodies[4])["from"] == "a-point"
+
+
+def test_the_answer_arrives_as_a_new_comment(turns: list[dict], found, monkeypatch) -> None:
+    """Edited into the progress note, the answer never reaches the phone.
+
+    GitHub notifies on a comment being posted, not on one being edited. So the
+    notification said "working…" and the answer landed in silence, which from a
+    phone is indistinguishable from the turn never having finished.
+    """
+    c = FakeChannel(
+        [channel.Issue(4, "t", "| session | claude:7e90 |", "")], {4: [prompt(11, "q")]}
+    )
+    attend.once(c, conn=None)
+    answers = [x for x in c.comments_[4] if comment.turn_key(x.body)]
+    assert len(answers) == 1
+    assert answers[0].id not in c.edited, "posted, not edited into the progress note"
