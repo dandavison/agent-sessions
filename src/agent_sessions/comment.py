@@ -208,6 +208,12 @@ def body(session: dict[str, Any], prompts: list[str]) -> str:
     return f"| | |\n|---|---|\n{rows}\n\n### What I have said\n\n{said or '*Nothing yet.*'}\n"
 
 
+def frontmatter(body_text: str) -> dict[str, str]:
+    """The table at the top of an issue, read back as the data it is."""
+    found = re.findall(r"^\|\s*(\w+)\s*\|\s*(\S+)\s*\|", body_text, re.MULTILINE)
+    return dict(found)
+
+
 def session_id(body_text: str) -> str:
     """The session an issue is for, read back off the table it was written into."""
     found = re.search(r"^\|\s*session\s*\|\s*(\S+)\s*\|", body_text, re.MULTILINE)

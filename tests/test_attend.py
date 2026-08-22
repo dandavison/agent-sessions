@@ -646,3 +646,46 @@ def test_a_progress_comment_is_cleared_once_nothing_is_running(found, monkeypatc
     c = FakeChannel([issue()], {4: [litter]})
     attend.reconcile(c, issue(), SESSION)
     assert c.deleted == [60]
+
+
+def test_a_prompt_already_in_the_session_is_not_run_again(found, monkeypatch) -> None:
+    """Consumption records itself: the turn writes my prompt into the transcript.
+
+    That is what makes at-most-once hold without bookkeeping. Counting replies
+    in the thread was the bookkeeping, and it desynced every time the thread
+    was edited.
+    """
+    ran: list[str] = []
+    monkeypatch.setattr(
+        attend, "run_turn", lambda s, t, showing=None: (ran.append(t), ([], {}, ""))[1]
+    )
+    transcript(monkeypatch, said_by_me("already asked", "u1"), Said("assistant", "done"))
+    c = FakeChannel([issue()], {4: [prompt(11, "already asked")]})
+    attend.once(c, conn=None)
+    assert ran == []
+
+
+def test_a_prompt_not_yet_in_the_session_is_run(turns: list[dict], found, monkeypatch) -> None:
+    transcript(monkeypatch, said_by_me("something else", "u1"))
+    c = FakeChannel([issue()], {4: [prompt(11, "brand new")]})
+    attend.once(c, conn=None)
+    assert turns[0]["prompt"] == "brand new"
+
+
+def test_a_prompt_a_rendering_says_it_answered_is_not_run_again(
+    turns: list[dict], found, monkeypatch
+) -> None:
+    """The second guard, for when the text does not match exactly.
+
+    Running the same prompt twice is the only thing here that cannot be undone,
+    so it is worth two independent reasons not to.
+    """
+    transcript(monkeypatch)
+    claimed = channel.Comment(
+        id=50,
+        body=comment.render_turn(comment.Turn("u1", "q", []), asked_by=11),
+        author="a[bot]",
+    )
+    c = FakeChannel([issue()], {4: [prompt(11, "asked"), claimed]})
+    attend.once(c, conn=None)
+    assert turns == []

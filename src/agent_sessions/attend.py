@@ -245,6 +245,49 @@ def reindex(conn: Any) -> None:
     index.sync(conn)
 
 
+def reconcile(control: Control, issue: channel.Issue, session: dict[str, Any] | None) -> None:
+    """Make the thread show the session, rather than whatever got posted.
+
+    The thread was accumulated: the loop appended as it went, and every state
+    it needed afterwards had to be inferred back out of the shape of it. Every
+    bug worth the name came from that inference. Rendered instead, from the
+    transcript, the thread cannot disagree with the session — and work done at
+    the keyboard shows up without anything having to post it.
+
+    My own comments are the input and are never touched. What is left over from
+    a crash is: reconciling happens between turns, so a comment saying a turn is
+    running is litter by definition.
+    """
+    if session is None:
+        return
+    blocks = index.SOURCES[session["agent"]].blocks(Path(session["path"]), since=window(issue))
+    want = {t.key: comment.render_turn(t) for t in comment.turns(blocks) if t.key}
+    comments = control.comments(issue.number)
+    have = {comment.turn_key(c.body): c for c in comments if c.is_ours and comment.turn_key(c.body)}
+    for key, body in want.items():
+        if key not in have:
+            control.post(issue.number, body)
+        elif have[key].body != body:
+            control.edit(have[key].id, body)
+    for key, stale in have.items():
+        if key not in want:
+            control.delete(stale.id)
+    for litter in comments:
+        if litter.is_progress:
+            control.delete(litter.id)
+    log.detail(f"#{issue.number} reconciled: {len(want)} turns")
+
+
+def window(issue: channel.Issue) -> str:
+    """Where this issue's view of the session starts, if it says.
+
+    An issue need not carry a session from its beginning — a long one would
+    make an unreadable thread and a slow reconcile — so the body may name a
+    point to start from.
+    """
+    return comment.frontmatter(issue.body).get("from", "")
+
+
 def unanswered(comments: list[channel.Comment]) -> list[channel.Comment]:
     """My prompts that the loop has not replied to yet.
 
