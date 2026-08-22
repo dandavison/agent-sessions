@@ -579,3 +579,70 @@ def test_a_pass_does_not_swallow_a_credential_failure(monkeypatch, capsys) -> No
 
     with pytest.raises(channel.NotAuthorized):
         attend.a_pass(Denied([]), conn=None)
+
+
+# --- the thread reconciled against the session --------------------------------
+
+
+def transcript(monkeypatch, *blocks) -> None:
+    monkeypatch.setattr(index.SOURCES["claude"], "blocks", lambda path, since="": list(blocks))
+
+
+def said_by_me(text: str, uuid: str) -> Said:
+    return Said(role="user", text=text, uuid=uuid)
+
+
+def test_a_turn_i_had_at_the_keyboard_appears_in_the_thread(found, monkeypatch) -> None:
+    """The guarantee the thread could not make: mixed use is now the normal case.
+
+    Nothing was posted for work done in the TUI, so the thread read as though
+    the conversation were only what came through it.
+    """
+    transcript(
+        monkeypatch, said_by_me("asked at the keyboard", "u1"), Said("assistant", "answered")
+    )
+    c = FakeChannel([issue()], {4: []})
+    attend.reconcile(c, issue(), SESSION)
+    assert comment.turn_key(c.posted[0][1]) == "u1"
+    assert "answered" in c.posted[0][1]
+
+
+def test_a_turn_whose_rendering_has_changed_is_rewritten_not_duplicated(found, monkeypatch) -> None:
+    transcript(monkeypatch, said_by_me("q", "u1"), Said("assistant", "the fuller answer"))
+    already = channel.Comment(
+        id=50, body=comment.render_turn(comment.Turn("u1", "q", [])), author="a[bot]"
+    )
+    c = FakeChannel([issue()], {4: [already]})
+    attend.reconcile(c, issue(), SESSION)
+    assert c.posted == []
+    assert c.edited[0][0] == 50
+    assert "the fuller answer" in c.edited[0][1]
+
+
+def test_a_rendering_of_a_turn_that_is_gone_is_deleted(found, monkeypatch) -> None:
+    """After a rewind the session is shorter, and the thread should be too."""
+    transcript(monkeypatch)
+    stale = channel.Comment(
+        id=50, body=comment.render_turn(comment.Turn("u1", "q", [])), author="a[bot]"
+    )
+    c = FakeChannel([issue()], {4: [stale]})
+    attend.reconcile(c, issue(), SESSION)
+    assert c.deleted == [50]
+
+
+def test_my_own_comments_are_never_touched(found, monkeypatch) -> None:
+    """They are the input. Nothing here is entitled to rewrite what I asked."""
+    transcript(monkeypatch)
+    c = FakeChannel([issue()], {4: [prompt(11, "mine")]})
+    attend.reconcile(c, issue(), SESSION)
+    assert c.deleted == []
+    assert c.edited == []
+
+
+def test_a_progress_comment_is_cleared_once_nothing_is_running(found, monkeypatch) -> None:
+    """Reconciling happens between turns, so any left over is litter from a crash."""
+    transcript(monkeypatch)
+    litter = channel.Comment(id=60, body=f"{channel.RUNNING}\nworking…", author="a[bot]")
+    c = FakeChannel([issue()], {4: [litter]})
+    attend.reconcile(c, issue(), SESSION)
+    assert c.deleted == [60]
