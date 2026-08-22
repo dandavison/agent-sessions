@@ -283,6 +283,10 @@ class Channel:
             if not more:
                 break
             found = found + more
+        if page > 1:
+            # Seven hundred comments for seventy-three turns went unnoticed for
+            # a day because paging said nothing. A long thread is worth a line.
+            log.say(f"{path}: {len(found)} over {page} pages")
         return found
 
     def _poll(self, path: str, params: dict[str, str]) -> list[dict[str, Any]]:
@@ -292,7 +296,8 @@ class Channel:
         cache = path + params.get("page", "")
         headers = {"If-None-Match": tag} if (tag := self._etags.get(cache)) else {}
         response = self.client.get(path, params=params, headers=headers)
-        log.detail(f"GET {path} -> {response.status_code}")
+        left = response.headers.get("x-ratelimit-remaining", "?")
+        log.detail(f"GET {path} -> {response.status_code} ({left} left)")
         if _refuses(response):
             raise NotAuthorized(f"GitHub refused us: {response.status_code} on {path}")
         if response.status_code == 304:

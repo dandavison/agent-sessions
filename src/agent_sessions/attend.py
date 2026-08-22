@@ -143,9 +143,10 @@ def once(control: Control, conn: Any, only: int | None = None) -> int:
     """
     answered = 0
     issues = [control.issue(only)] if only is not None else control.issues()
-    log.detail(f"polled: {len(issues)} open")
+    log.detail(f"polled: {', '.join(f'#{i.number}' for i in issues) or 'nothing'} open")
     for issue in issues:
         if not issue.session_id:
+            log.detail(f"#{issue.number} names no session")
             continue
         answered += _attend(control, conn, issue)
     return answered
@@ -321,8 +322,16 @@ def reconcile(control: Control, issue: channel.Issue, session: dict[str, Any] | 
         if litter.is_progress:
             control.delete(litter.id)
             gone += 1
+    # The window is in every line because the day it was silently erased the
+    # thread re-rendered the whole session and the log said only "1 posted".
+    at = f"#{issue.number} from {window(issue)[:8] or 'the start'}"
     if made or changed or gone:
-        log.say(f"#{issue.number} reconciled: {made} posted, {changed} rewritten, {gone} deleted")
+        log.say(
+            f"{at}: {len(want)} turns wanted, {len(have)} had"
+            f" — {made} posted, {changed} rewritten, {gone} deleted"
+        )
+    else:
+        log.detail(f"{at}: settled, {len(want)} turns")
 
 
 def window(issue: channel.Issue) -> str:
