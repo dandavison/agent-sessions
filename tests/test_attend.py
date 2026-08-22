@@ -763,3 +763,26 @@ def test_an_issue_that_names_no_start_shows_only_the_recent_past(
     c = FakeChannel([issue()], {4: []})
     attend.reconcile(c, issue(), SESSION)
     assert len(c.posted) == attend.MOST
+
+
+def test_a_prompt_consumed_before_the_window_is_not_run_again(
+    turns: list[dict], found, monkeypatch
+) -> None:
+    """Two different questions, and they were being asked of the same range.
+
+    The window says what the thread shows. Whether a prompt has been consumed
+    is a fact about the whole session. Conflated, moving a window forward
+    re-armed every prompt behind it.
+    """
+    whole = [Said(role="user", text="asked long ago", uuid="u1"), Said("assistant", "answered")]
+
+    def blocks(path, since="", tip=False):
+        return [] if since else whole
+
+    monkeypatch.setattr(index.SOURCES["claude"], "blocks", blocks)
+    windowed = channel.Issue(
+        number=4, title="t", body="| session | claude:7e90 |\n| from | later |", url=""
+    )
+    c = FakeChannel([windowed], {4: [prompt(11, "asked long ago")]})
+    attend.once(c, conn=None)
+    assert turns == []
