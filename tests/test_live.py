@@ -219,3 +219,26 @@ def test_a_prompt_answered_before_a_compaction_is_not_run_again(scratch, live, m
     attend.once(control, conn=None, only=issue.number)
 
     assert ran == [], f"already answered before the compaction, but ran {ran}"
+
+
+def test_a_prompt_left_too_long_is_never_run(scratch, live, monkeypatch) -> None:
+    """No backfill, against a real issue: being down is not a reason to catch up.
+
+    The nine-prompt replay was the loop coming back and doing everything said
+    while it was away. Whatever the cause next time — a compaction, a bad
+    window, an index rebuilt — a prompt this old is not run at all.
+    """
+    control, issue, me = live
+    ran: list[str] = []
+    monkeypatch.setattr(attend, "run_turn", lambda *a, **k: ran.append(a[1]) or ([], {}, ""))
+    monkeypatch.setattr(attend.limits, "STALE", 0.0)
+
+    mine = me.post(issue.number, "this one sat around too long")
+    attend.once(control, conn=None, only=issue.number)
+
+    assert ran == [], "a stale prompt is never run"
+    kinds = {
+        r["content"]
+        for r in control._get(f"/repos/{control.repo}/issues/comments/{mine}/reactions")
+    }
+    assert channel.IGNORED in kinds, "and says so, so I know not to wait for it"
