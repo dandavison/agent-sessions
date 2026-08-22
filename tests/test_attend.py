@@ -786,3 +786,34 @@ def test_a_prompt_consumed_before_the_window_is_not_run_again(
     c = FakeChannel([windowed], {4: [prompt(11, "asked long ago")]})
     attend.once(c, conn=None)
     assert turns == []
+
+
+# --- what one pass is allowed to touch ----------------------------------------
+
+
+def test_a_pass_can_be_confined_to_one_issue(turns: list[dict], found) -> None:
+    """A run that acts on every open issue cannot be tested against the real repo.
+
+    Driving the loop against a scratch issue reached into the two I actually
+    use and posted on both, because a pass is over everything that is open.
+    """
+    mine = channel.Issue(number=4, title="t", body="| session | claude:7e90 |", url="")
+    other = channel.Issue(number=9, title="t", body="| session | claude:7e90 |", url="")
+    c = FakeChannel([mine, other], {4: [prompt(11, "for four")], 9: [prompt(12, "for nine")]})
+    attend.once(c, conn=None, only=4)
+    assert [t["prompt"] for t in turns] == ["for four"]
+
+
+def test_a_session_that_has_gone_is_said_once_not_once_per_prompt(turns: list[dict], found) -> None:
+    """Thirty prompts on an issue whose session was missing became thirty comments.
+
+    One fact about the issue, so it is said once. Saying it per prompt turns a
+    stale index into a thread full of the same sentence.
+    """
+    c = FakeChannel(
+        [issue(session_id="claude:gone")],
+        {4: [prompt(11, "a"), prompt(12, "b"), prompt(13, "c")]},
+    )
+    attend.once(c, conn=None)
+    assert len(c.posted) == 1
+    assert "claude:gone" in c.posted[0][1]
