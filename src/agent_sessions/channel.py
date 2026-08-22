@@ -195,6 +195,15 @@ class Channel:
         found = self._poll(f"/repos/{self.repo}/issues", {"state": "open", "per_page": "100"})
         return [_issue(raw) for raw in found if "pull_request" not in raw]
 
+    def issue(self, number: int) -> Issue:
+        """One issue, asked for by name.
+
+        The list is eventually consistent — a newly created issue is missing
+        from it for a few seconds — so anything that already knows the number
+        asks for it rather than waiting for a list to catch up.
+        """
+        return _issue(self._one(f"/repos/{self.repo}/issues/{number}"))
+
     def comments(self, number: int) -> list[Comment]:
         """Every comment, not the first page of them.
 
@@ -254,6 +263,15 @@ class Channel:
         return _issue(raw)
 
     # --- the wire -----------------------------------------------------------
+
+    def _one(self, path: str) -> dict[str, Any]:
+        assert self.client is not None
+        self._authorize()
+        response = self.client.get(path)
+        if _refuses(response):
+            raise NotAuthorized(f"GitHub refused us: {response.status_code} on {path}")
+        response.raise_for_status()
+        return response.json()
 
     def _all(self, path: str) -> list[dict[str, Any]]:
         """Follow the pages. The first is conditional, so the common case is free."""

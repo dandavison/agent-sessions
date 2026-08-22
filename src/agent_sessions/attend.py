@@ -67,6 +67,7 @@ class Control(Protocol):
     """What the loop needs of a channel, so a fake is a fake and not a mock."""
 
     def issues(self) -> list[channel.Issue]: ...
+    def issue(self, number: int) -> channel.Issue: ...
     def comments(self, number: int) -> list[channel.Comment]: ...
     def post(self, number: int, body: str) -> int: ...
     def edit(self, comment_id: int, body: str) -> None: ...
@@ -141,7 +142,7 @@ def once(control: Control, conn: Any, only: int | None = None) -> int:
     is exactly what happened the first time this was exercised for real.
     """
     answered = 0
-    issues = [i for i in control.issues() if only is None or i.number == only]
+    issues = [control.issue(only)] if only is not None else control.issues()
     log.detail(f"polled: {len(issues)} open")
     for issue in issues:
         if not issue.session_id:

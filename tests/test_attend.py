@@ -37,6 +37,9 @@ class FakeChannel:
     def issues(self) -> list[channel.Issue]:
         return self.issues_
 
+    def issue(self, number: int) -> channel.Issue:
+        return next(i for i in self.issues_ if i.number == number)
+
     def comments(self, number: int) -> list[channel.Comment]:
         return self.comments_.get(number, [])
 
