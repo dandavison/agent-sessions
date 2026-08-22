@@ -212,8 +212,13 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
             if turn
             else comment.render(blocks, summary)
         )
-        control.edit(note, body)
-        log.say(f"{tag} posted {len(body):,} chars")
+        # Posted rather than edited into the progress note, and the note then
+        # thrown away. An edit reaches an open page and nothing else: GitHub
+        # notifies on a comment appearing, so editing meant the phone heard
+        # "working…" and never heard the answer.
+        control.post(issue.number, body)
+        control.delete(note)
+        log.say(f"{tag} posted {len(body):,} chars, dropped the progress note")
         control.mark_done(prompt.id)
         answered += 1
     reconcile(control, issue, session)

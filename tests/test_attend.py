@@ -130,11 +130,16 @@ def test_a_comment_of_mine_is_a_prompt(turns: list[dict], found) -> None:
 
 
 def test_the_answer_goes_back_to_the_issue_it_came_from(turns: list[dict], found) -> None:
-    """It lands in the comment posted when the turn began, not a new one."""
+    """On the issue that asked, and posted rather than edited into the note.
+
+    GitHub notifies on a comment appearing and says nothing about an edit, so
+    an answer written into the progress note reaches an open page and nobody
+    else. From a phone that is indistinguishable from a turn that died.
+    """
     c = FakeChannel([issue()], {4: [prompt()]})
     attend.once(c, conn=None)
     assert c.posted[0][0] == 4
-    assert "Done." in c.edited[-1][1]
+    assert "Done." in c.posted[-1][1]
 
 
 def test_a_prompt_is_taken_up_before_it_is_run(turns: list[dict], found) -> None:
@@ -409,9 +414,10 @@ def test_a_comment_appears_before_the_turn_starts(turns: list[dict], found) -> N
 def test_the_answer_replaces_that_comment_rather_than_adding_one(turns: list[dict], found) -> None:
     c = FakeChannel([issue()], {4: [prompt()]})
     attend.once(c, conn=None)
-    assert len(c.posted) == 1
-    assert "Done." in c.edited[-1][1]
-    assert channel.RUNNING not in c.edited[-1][1]
+    left = [x for x in c.comments_[4] if x.is_ours]
+    assert len(left) == 1, "the answer, and the progress note thrown away"
+    assert "Done." in left[0].body
+    assert channel.RUNNING not in left[0].body
 
 
 def test_a_stale_progress_comment_does_not_count_as_an_answer(turns: list[dict], found) -> None:
@@ -866,9 +872,10 @@ def test_a_turn_leaves_one_comment_not_two(turns: list[dict], found, monkeypatch
     monkeypatch.setattr(index.SOURCES["claude"], "blocks", lambda p, since="", tip=False: consumed)
     c = FakeChannel([issue()], {4: [prompt(11, "two and two?")]})
     attend.once(c, conn=None)
-    assert len(c.posted) == 1, "the progress comment, and nothing else"
-    assert comment.turn_key(c.edited[-1][1]) == "u7"
-    assert comment.asked_by(c.edited[-1][1]) == 11
+    left = [x for x in c.comments_[4] if x.is_ours]
+    assert len(left) == 1, "one turn, one comment"
+    assert comment.turn_key(left[0].body) == "u7"
+    assert comment.asked_by(left[0].body) == 11
 
 
 def test_reconciling_keeps_what_only_the_thread_knew(turns: list[dict], found, monkeypatch) -> None:
@@ -916,10 +923,15 @@ def test_the_answer_arrives_as_a_new_comment(turns: list[dict], found, monkeypat
     notification said "working…" and the answer landed in silence, which from a
     phone is indistinguishable from the turn never having finished.
     """
-    c = FakeChannel(
-        [channel.Issue(4, "t", "| session | claude:7e90 |", "")], {4: [prompt(11, "q")]}
-    )
+    consumed: list[Block] = []
+
+    def fake(session, text, showing=None, tag=""):
+        consumed.extend([Said(role="user", text=text, uuid="u7"), Said("assistant", "four")])
+        return list(consumed), {}, "before"
+
+    monkeypatch.setattr(attend, "run_turn", fake)
+    monkeypatch.setattr(index.SOURCES["claude"], "blocks", lambda p, since="", tip=False: consumed)
+    c = FakeChannel([issue()], {4: [prompt(11, "q")]})
     attend.once(c, conn=None)
-    answers = [x for x in c.comments_[4] if comment.turn_key(x.body)]
-    assert len(answers) == 1
-    assert answers[0].id not in c.edited, "posted, not edited into the progress note"
+    assert any("four" in body for _, body in c.posted), "the answer was posted"
+    assert not any("four" in body for _, body in c.edited), "not edited into the note"
