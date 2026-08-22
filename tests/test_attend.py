@@ -223,13 +223,15 @@ def test_a_session_gets_one_issue_not_one_per_visit(turns: list[dict]) -> None:
     assert first.number == second.number == 4
 
 
-def test_a_session_with_no_issue_yet_gets_one(turns: list[dict]) -> None:
+def test_a_session_with_no_issue_yet_gets_one(turns: list[dict], monkeypatch) -> None:
+    monkeypatch.setattr(index.SOURCES["claude"], "leaf", lambda path: "leaf-now")
     opened = FakeChannel([])
     made = attend.issue_for(opened, SESSION)
     assert made.session_id == "claude:7e90"
 
 
-def test_the_new_issue_is_titled_as_the_session_is(turns: list[dict]) -> None:
+def test_the_new_issue_is_titled_as_the_session_is(turns: list[dict], monkeypatch) -> None:
+    monkeypatch.setattr(index.SOURCES["claude"], "leaf", lambda path: "leaf-now")
     opened = FakeChannel([])
     attend.issue_for(opened, SESSION | {"title": "why is conform relocating"})
     assert opened.titles == ["why is conform relocating"]

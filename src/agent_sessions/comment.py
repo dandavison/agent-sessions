@@ -229,6 +229,7 @@ def _frontmatter(session: dict[str, Any]) -> dict[str, str]:
         "session": str(session.get("id", "")),
         "project": str(session.get("project") or ""),
         "cwd": str(session.get("cwd") or ""),
+        "from": str(session.get("from") or ""),
     }
 
 

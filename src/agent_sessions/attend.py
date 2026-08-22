@@ -41,6 +41,10 @@ from agent_sessions.models import Block, Ran, Said
 # An orphan keeps writing to a transcript nobody thinks is being written to.
 _children: set[subprocess.Popen[str]] = set()
 
+# How many turns an issue shows when it does not say where to start. The old
+# ones say nothing, and a whole session is neither readable nor cheap.
+MOST = 20
+
 INTERVAL = 2.0
 
 # How often the transcript is looked at while a turn runs, and how long it may
@@ -76,6 +80,9 @@ class Control(Protocol):
 def issue_for(control: Control, session: dict[str, Any]) -> channel.Issue:
     """The issue that makes this session reachable from a phone, opening one if needed.
 
+    A new one records where the session has got to, so the thread carries the
+    conversation from then on rather than re-staging everything said before it.
+
     Which session an issue is for is written in its body and read back from
     there, so this asks GitHub rather than keeping a mapping of its own. The
     index is safe to delete; the answer to `is there already an issue for this`
@@ -84,7 +91,10 @@ def issue_for(control: Control, session: dict[str, Any]) -> channel.Issue:
     for existing in control.issues():
         if existing.session_id == session["id"]:
             return existing
-    return control.open(session.get("title") or session["id"], comment.body(session, []))
+    started = index.SOURCES[session["agent"]].leaf(Path(session["path"]))
+    return control.open(
+        session.get("title") or session["id"], comment.body(session | {"from": started}, [])
+    )
 
 
 def loop(control: Control, conn: Any, interval: float = INTERVAL) -> None:
@@ -275,7 +285,7 @@ def reconcile(control: Control, issue: channel.Issue, session: dict[str, Any] | 
     if session is None:
         return
     blocks = index.SOURCES[session["agent"]].blocks(Path(session["path"]), since=window(issue))
-    want = {t.key: comment.render_turn(t) for t in comment.turns(blocks) if t.key}
+    want = {t.key: comment.render_turn(t) for t in comment.turns(blocks)[-MOST:] if t.key}
     comments = control.comments(issue.number)
     have = {comment.turn_key(c.body): c for c in comments if c.is_ours and comment.turn_key(c.body)}
     made = changed = gone = 0
