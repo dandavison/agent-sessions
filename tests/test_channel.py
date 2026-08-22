@@ -416,8 +416,11 @@ def test_a_finished_prompt_is_marked_done_not_left_watched(monkeypatch) -> None:
     c = channel_over(
         {
             "GET /repos/dandavison/agent-work/issues/comments/11/reactions": [
-                {"id": 77, "content": "eyes"},
-                {"id": 78, "content": "heart"},
+                {"id": 77, "content": "eyes", "user": {"type": "Bot"}},
+                {"id": 78, "content": "heart", "user": {"type": "Bot"}},
+                # Mine, from before this had an app of its own. Deleting a
+                # reaction acts as whoever left it, so this one is not ours.
+                {"id": 79, "content": "eyes", "user": {"type": "User"}},
             ],
             "POST /repos/dandavison/agent-work/issues/comments/11/reactions": {"id": 79},
             "DELETE /repos/dandavison/agent-work/issues/comments/11/reactions/77": {},
@@ -427,6 +430,10 @@ def test_a_finished_prompt_is_marked_done_not_left_watched(monkeypatch) -> None:
     c.mark_done(11)
     methods = [(r.method, r.url.path) for r in seen]
     assert ("POST", "/repos/dandavison/agent-work/issues/comments/11/reactions") in methods
+    assert (
+        "DELETE",
+        "/repos/dandavison/agent-work/issues/comments/11/reactions/79",
+    ) not in methods, "not ours to remove, and asking is a 404 in the log"
     assert (
         "DELETE",
         "/repos/dandavison/agent-work/issues/comments/11/reactions/77",

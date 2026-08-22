@@ -237,8 +237,12 @@ class Channel:
         self._send(
             "POST", f"/repos/{self.repo}/issues/comments/{comment_id}/reactions", {"content": DONE}
         )
+        # Ours only. A reaction is deleted as whoever left it, so the eyes I
+        # put on a comment by hand — or an older build of this left as me,
+        # before it had an app of its own — are not the app's to take off, and
+        # asking is a 404 that reaches the log as a failure.
         for reaction in self._get(f"/repos/{self.repo}/issues/comments/{comment_id}/reactions"):
-            if reaction.get("content") == SEEN:
+            if reaction.get("content") == SEEN and reaction.get("user", {}).get("type") == "Bot":
                 self._send(
                     "DELETE",
                     f"/repos/{self.repo}/issues/comments/{comment_id}/reactions/{reaction['id']}",
