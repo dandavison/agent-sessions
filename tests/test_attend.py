@@ -568,3 +568,14 @@ def test_an_interrupted_turn_is_said_to_be_interrupted(
     c = FakeChannel([issue()], {4: [prompt()]})
     attend.once(c, conn=None)
     assert "cut off" in c.edited[-1][1].lower()
+
+
+def test_a_pass_does_not_swallow_a_credential_failure(monkeypatch, capsys) -> None:
+    """Everything else is worth retrying. This is worth stopping for."""
+
+    class Denied(FakeChannel):
+        def issues(self):
+            raise channel.NotAuthorized("the token is not valid")
+
+    with pytest.raises(channel.NotAuthorized):
+        attend.a_pass(Denied([]), conn=None)

@@ -385,3 +385,32 @@ def test_a_client_i_was_given_is_not_re_authorized(monkeypatch) -> None:
     c = channel.Channel(repo="dandavison/agent-work", client=given)
     c._authorize()
     assert "Authorization" not in given.headers
+
+
+# --- a failure that can never come right on its own ---------------------------
+
+
+def test_a_401_is_not_a_blip() -> None:
+    """It cannot resolve itself, so retrying every two seconds for ever is a lie.
+
+    An expired or wrong credential looked exactly like a network wobble in the
+    log, and the loop sat there failing silently all afternoon.
+    """
+    c = channel_over({"GET /repos/dandavison/agent-work/issues": httpx.Response(401, json={})})
+    with pytest.raises(channel.NotAuthorized):
+        c.issues()
+
+
+def test_a_403_for_permissions_is_not_a_blip_either() -> None:
+    denied = httpx.Response(403, json={}, headers={"x-ratelimit-remaining": "4999"})
+    c = channel_over({"GET /repos/dandavison/agent-work/issues": denied})
+    with pytest.raises(channel.NotAuthorized):
+        c.issues()
+
+
+def test_a_403_from_the_rate_limit_is_a_blip() -> None:
+    """That one does come right on its own, so it must not stop the loop."""
+    limited = httpx.Response(403, json={}, headers={"x-ratelimit-remaining": "0"})
+    c = channel_over({"GET /repos/dandavison/agent-work/issues": limited})
+    with pytest.raises(httpx.HTTPStatusError):
+        c.issues()
