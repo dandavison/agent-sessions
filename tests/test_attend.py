@@ -892,3 +892,18 @@ def test_reconciling_keeps_what_only_the_thread_knew(turns: list[dict], found, m
     assert comment.asked_by(c.edited[-1][1]) == 11
     assert comment.point(c.edited[-1][1]) == "leaf"
     assert "four and a bit" in c.edited[-1][1]
+
+
+def test_restating_the_body_keeps_the_window(turns: list[dict], found, monkeypatch) -> None:
+    """The body is rewritten every pass from the session, which has no window.
+
+    So the window survived exactly until the first pass, and the thread then
+    rendered the whole session again. The same mistake as dropping the marks:
+    re-rendering must not lose what only the thread knew.
+    """
+    windowed = channel.Issue(
+        number=4, title="t", body="| session | claude:7e90 |\n| from | a-point |", url=""
+    )
+    c = FakeChannel([windowed], {4: []})
+    attend.once(c, conn=None)
+    assert comment.frontmatter(c.bodies[4])["from"] == "a-point"
