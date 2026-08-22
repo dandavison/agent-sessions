@@ -731,3 +731,33 @@ def test_two_different_prompts_in_one_pass_both_run(turns: list[dict], found, mo
     c = FakeChannel([issue()], {4: [prompt(11, "first"), prompt(12, "second")]})
     attend.once(c, conn=None)
     assert [b.text for b in consumed if isinstance(b, Said)] == ["first", "second"]
+
+
+# --- a thread is a window, not a whole session --------------------------------
+
+
+def test_an_issue_opened_for_a_session_starts_from_where_it_is(
+    turns: list[dict], monkeypatch
+) -> None:
+    """Seventy-three turns of history posted as seventy-three comments, once.
+
+    An issue is a way in, not an archive. Opening one records where the session
+    had got to, so the thread carries the conversation from then on.
+    """
+    monkeypatch.setattr(index.SOURCES["claude"], "leaf", lambda path: "leaf-now")
+    c = FakeChannel([])
+    made = attend.issue_for(c, SESSION)
+    assert comment.frontmatter(made.body)["from"] == "leaf-now"
+
+
+def test_an_issue_that_names_no_start_shows_only_the_recent_past(
+    turns: list[dict], found, monkeypatch
+) -> None:
+    """The old issues have no start, and rendering all of one is unreadable."""
+    many = []
+    for i in range(attend.MOST + 10):
+        many += [Said(role="user", text=f"q{i}", uuid=f"u{i}"), Said("assistant", f"a{i}")]
+    monkeypatch.setattr(index.SOURCES["claude"], "blocks", lambda path, since="", tip=False: many)
+    c = FakeChannel([issue()], {4: []})
+    attend.reconcile(c, issue(), SESSION)
+    assert len(c.posted) == attend.MOST

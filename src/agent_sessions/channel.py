@@ -40,6 +40,9 @@ from agent_sessions import comment, log
 from agent_sessions.comment import MARKER, RUNNING
 
 API = "https://api.github.com"
+
+# GitHub's maximum, and the unit of paging.
+PAGE = 100
 REPO = os.environ.get("AGENT_WORK_REPO", "dandavison/agent-work")
 
 # Posted the moment a prompt is picked up, so that a turn taking minutes still
@@ -193,8 +196,12 @@ class Channel:
         return [_issue(raw) for raw in found if "pull_request" not in raw]
 
     def comments(self, number: int) -> list[Comment]:
-        found = self._poll(f"/repos/{self.repo}/issues/{number}/comments", {"per_page": "100"})
-        return [_comment(raw) for raw in found]
+        """Every comment, not the first page of them.
+
+        Reconciling against one page of a longer thread reposts nearly every
+        turn, for ever, because the turns it cannot see look missing.
+        """
+        return [_comment(raw) for raw in self._all(f"/repos/{self.repo}/issues/{number}/comments")]
 
     # --- writing ------------------------------------------------------------
 
@@ -248,22 +255,35 @@ class Channel:
 
     # --- the wire -----------------------------------------------------------
 
+    def _all(self, path: str) -> list[dict[str, Any]]:
+        """Follow the pages. The first is conditional, so the common case is free."""
+        found = self._poll(path, {"per_page": str(PAGE)})
+        page = 1
+        while len(found) == page * PAGE:
+            page += 1
+            more = self._poll(path, {"per_page": str(PAGE), "page": str(page)})
+            if not more:
+                break
+            found = found + more
+        return found
+
     def _poll(self, path: str, params: dict[str, str]) -> list[dict[str, Any]]:
         """A conditional GET. A 304 means unchanged, which is not the same as empty."""
         assert self.client is not None
         self._authorize()
-        headers = {"If-None-Match": tag} if (tag := self._etags.get(path)) else {}
+        cache = path + params.get("page", "")
+        headers = {"If-None-Match": tag} if (tag := self._etags.get(cache)) else {}
         response = self.client.get(path, params=params, headers=headers)
         log.detail(f"GET {path} -> {response.status_code}")
         if _refuses(response):
             raise NotAuthorized(f"GitHub refused us: {response.status_code} on {path}")
         if response.status_code == 304:
-            return self._cached.get(path, [])
+            return self._cached.get(cache, [])
         response.raise_for_status()
         if tag := response.headers.get("ETag"):
-            self._etags[path] = tag
-        self._cached[path] = response.json()
-        return self._cached[path]
+            self._etags[cache] = tag
+        self._cached[cache] = response.json()
+        return self._cached[cache]
 
     def _send(self, method: str, path: str, payload: dict[str, str]) -> dict[str, Any]:
         assert self.client is not None
