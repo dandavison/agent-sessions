@@ -904,6 +904,6 @@ def test_restating_the_body_keeps_the_window(turns: list[dict], found, monkeypat
     windowed = channel.Issue(
         number=4, title="t", body="| session | claude:7e90 |\n| from | a-point |", url=""
     )
-    c = FakeChannel([windowed], {4: []})
+    c = FakeChannel([windowed], {4: [prompt(11, "a question")]})
     attend.once(c, conn=None)
     assert comment.frontmatter(c.bodies[4])["from"] == "a-point"

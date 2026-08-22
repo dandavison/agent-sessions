@@ -237,6 +237,7 @@ def redact(text: str) -> str:
 
 
 def _frontmatter(session: dict[str, Any]) -> dict[str, str]:
+    """What the table says. `from` is the thread's, the rest is the session's."""
     return {
         "session": str(session.get("id", "")),
         "project": str(session.get("project") or ""),

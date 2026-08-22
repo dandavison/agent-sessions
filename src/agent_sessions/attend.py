@@ -418,8 +418,12 @@ def _restate(control: Control, issue: channel.Issue, session: dict[str, Any] | N
     the session, and the body should not assert a turn the agent has never
     heard of.
     """
+    # Merged over what the issue already says, not written from the session
+    # alone: the window lives in the body and the session has never heard of it.
+    known = comment.frontmatter(issue.body)
     control.set_body(
-        issue.number, comment.body(session or {"id": issue.session_id}, _said(session))
+        issue.number,
+        comment.body({"id": issue.session_id, **known, **(session or {})}, _said(session)),
     )
 
 
