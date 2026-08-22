@@ -149,19 +149,14 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
     if _rewind(control, conn, issue):
         return 0
     session = lookup(conn, issue.session_id)
-    blocks = (
-        index.SOURCES[session["agent"]].blocks(Path(session["path"]), since=window(issue))
-        if session
-        else []
-    )
-    waiting = pending(control.comments(issue.number), blocks)
+    waiting = pending(control.comments(issue.number), _seen(session))
     if not waiting:
         reconcile(control, issue, session)
         return 0
     log.say(f"#{issue.number} {len(waiting)} waiting")
     answered = 0
     for prompt in waiting:
-        if prompt not in pending(control.comments(issue.number), _seen(session, issue)):
+        if prompt not in pending(control.comments(issue.number), _seen(session)):
             log.say(f"#{issue.number} skipping {prompt.id}: the session has it already")
             control.mark_done(prompt.id)
             continue
@@ -343,16 +338,20 @@ def _plain(text: str) -> str:
     return " ".join(text.split())
 
 
-def _seen(session: dict[str, Any] | None, issue: channel.Issue) -> list[Block]:
-    """What the session holds right now, read fresh.
+def _seen(session: dict[str, Any] | None) -> list[Block]:
+    """Everything the session holds, read fresh.
 
-    Asked again before each turn rather than once for the pass: a pass consumes
-    as it goes, so a prompt sent twice was still on the list after the first
-    copy had put that very text into the session.
+    All of it, not the window: the window says what the thread shows, and
+    whether a prompt has been consumed is a fact about the session. Asked of
+    the window, moving one forward re-armed every prompt behind it.
+
+    Read again before each turn rather than once for the pass, because a pass
+    consumes as it goes: a prompt sent twice was still on the list after the
+    first copy had put that very text into the session.
     """
     if session is None:
         return []
-    return index.SOURCES[session["agent"]].blocks(Path(session["path"]), since=window(issue))
+    return index.SOURCES[session["agent"]].blocks(Path(session["path"]))
 
 
 def _cut_off_note(cut_off: bool) -> str:
