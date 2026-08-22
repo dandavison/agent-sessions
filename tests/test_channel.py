@@ -414,3 +414,32 @@ def test_a_403_from_the_rate_limit_is_a_blip() -> None:
     c = channel_over({"GET /repos/dandavison/agent-work/issues": limited})
     with pytest.raises(httpx.HTTPStatusError):
         c.issues()
+
+
+def test_a_finished_prompt_is_marked_done_not_left_watched(monkeypatch) -> None:
+    """The eyes meant `seen at some point`, which is no use once the answer is in.
+
+    Added on pickup and never removed, they said nothing about whether the
+    thing was still working. Swapped for a rocket when the turn lands, presence
+    of eyes means in flight.
+    """
+    seen: list[httpx.Request] = []
+    c = channel_over(
+        {
+            "GET /repos/dandavison/agent-work/issues/comments/11/reactions": [
+                {"id": 77, "content": "eyes"},
+                {"id": 78, "content": "heart"},
+            ],
+            "POST /repos/dandavison/agent-work/issues/comments/11/reactions": {"id": 79},
+            "DELETE /repos/dandavison/agent-work/issues/comments/11/reactions/77": {},
+        },
+        seen,
+    )
+    c.mark_done(11)
+    methods = [(r.method, r.url.path) for r in seen]
+    assert ("POST", "/repos/dandavison/agent-work/issues/comments/11/reactions") in methods
+    assert (
+        "DELETE",
+        "/repos/dandavison/agent-work/issues/comments/11/reactions/77",
+    ) in methods
+    assert b"rocket" in seen[0].content

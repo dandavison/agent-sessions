@@ -26,6 +26,7 @@ class FakeChannel:
     bodies: dict[int, str] = field(default_factory=dict)
     titles: list[str] = field(default_factory=list)
     deleted: list[int] = field(default_factory=list)
+    done: list[int] = field(default_factory=list)
 
     def open(self, title: str, body: str) -> channel.Issue:
         self.titles.append(title)
@@ -51,6 +52,9 @@ class FakeChannel:
 
     def take_up(self, comment_id: int) -> None:
         self.taken.append(comment_id)
+
+    def mark_done(self, comment_id: int) -> None:
+        self.done.append(comment_id)
 
     def set_body(self, number: int, body: str) -> None:
         self.bodies[number] = body
@@ -683,3 +687,11 @@ def test_a_prompt_a_rendering_says_it_answered_is_not_run_again(
     c = FakeChannel([issue()], {4: [prompt(11, "asked"), claimed]})
     attend.once(c, conn=None)
     assert turns == []
+
+
+def test_a_prompt_is_marked_done_when_its_answer_lands(turns: list[dict], found) -> None:
+    """Eyes on means working; a rocket means the answer is there."""
+    c = FakeChannel([issue()], {4: [prompt(11)]})
+    attend.once(c, conn=None)
+    assert c.taken == [11]
+    assert c.done == [11]

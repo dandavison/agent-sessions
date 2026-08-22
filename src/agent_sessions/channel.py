@@ -46,6 +46,11 @@ REPO = os.environ.get("AGENT_WORK_REPO", "dandavison/agent-work")
 # shows something within seconds of asking for it.
 SEEN = "eyes"
 
+# Swapped in when the turn lands. The eyes were added on pickup and never
+# removed, so they said "seen at some point" and nothing about whether the
+# thing was still working. Now their presence means in flight.
+DONE = "rocket"
+
 # One tap, on my prompt or on the answer to it, meaning: put the session back
 # the way it was before this. Cheap to notice — the reaction summary comes back
 # with every comment already.
@@ -209,6 +214,29 @@ class Channel:
         self._send(
             "POST", f"/repos/{self.repo}/issues/comments/{comment_id}/reactions", {"content": SEEN}
         )
+
+    def mark_done(self, comment_id: int) -> None:
+        """Swap the eyes for a rocket: this one is answered, not merely noticed."""
+        self._send(
+            "POST", f"/repos/{self.repo}/issues/comments/{comment_id}/reactions", {"content": DONE}
+        )
+        for reaction in self._get(f"/repos/{self.repo}/issues/comments/{comment_id}/reactions"):
+            if reaction.get("content") == SEEN:
+                self._send(
+                    "DELETE",
+                    f"/repos/{self.repo}/issues/comments/{comment_id}/reactions/{reaction['id']}",
+                    {},
+                )
+
+    def _get(self, path: str) -> list[dict[str, Any]]:
+        assert self.client is not None
+        self._authorize()
+        response = self.client.get(path)
+        if _refuses(response):
+            raise NotAuthorized(f"GitHub refused us: {response.status_code} on {path}")
+        response.raise_for_status()
+        found = response.json()
+        return found if isinstance(found, list) else []
 
     def set_body(self, number: int, body: str) -> None:
         self._send("PATCH", f"/repos/{self.repo}/issues/{number}", {"body": body})
