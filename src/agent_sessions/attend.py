@@ -45,7 +45,7 @@ _children: set[subprocess.Popen[str]] = set()
 # ones say nothing, and a whole session is neither readable nor cheap.
 MOST = 20
 
-INTERVAL = 2.0
+INTERVAL = 1.0
 
 # How often the transcript is looked at while a turn runs, and how long it may
 # say nothing before saying that it is alive.
