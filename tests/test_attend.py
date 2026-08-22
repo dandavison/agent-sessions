@@ -715,7 +715,7 @@ def test_the_same_prompt_sent_twice_runs_once(turns: list[dict], found, monkeypa
     same = "Can we view this as a matrix"
     c = FakeChannel([issue()], {4: [prompt(11, same), prompt(12, same)]})
     attend.once(c, conn=None)
-    assert [b.text for b in consumed] == [same]
+    assert [b.text for b in consumed if isinstance(b, Said)] == [same]
 
 
 def test_two_different_prompts_in_one_pass_both_run(turns: list[dict], found, monkeypatch) -> None:
@@ -730,4 +730,4 @@ def test_two_different_prompts_in_one_pass_both_run(turns: list[dict], found, mo
     monkeypatch.setattr(index.SOURCES["claude"], "blocks", lambda path, since="": list(consumed))
     c = FakeChannel([issue()], {4: [prompt(11, "first"), prompt(12, "second")]})
     attend.once(c, conn=None)
-    assert [b.text for b in consumed] == ["first", "second"]
+    assert [b.text for b in consumed if isinstance(b, Said)] == ["first", "second"]

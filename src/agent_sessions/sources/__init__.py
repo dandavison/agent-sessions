@@ -48,7 +48,7 @@ class Source(Protocol):
         """
         ...
 
-    def blocks(self, path: Path, since: str = "") -> list[Block]:
+    def blocks(self, path: Path, since: str = "", tip: bool = False) -> list[Block]:
         """The conversation as blocks, which is what every reader wants.
 
         One parser per agent, and every place that shows a conversation is a

@@ -75,8 +75,8 @@ class ClaudeSource:
     def render(self, path: Path, tools: bool, whole: bool) -> Iterator[str]:
         return render(_read(path), tools=tools, whole=whole)
 
-    def blocks(self, path: Path, since: str = "") -> list[Block]:
-        return blocks(_read(path), since=since)
+    def blocks(self, path: Path, since: str = "", tip: bool = False) -> list[Block]:
+        return blocks(_read(path), since=since, tip=tip)
 
     def leaf(self, path: Path) -> str:
         return leaf(_read(path))
@@ -377,7 +377,9 @@ def _epoch(timestamp: str | None) -> int | None:
     return int(datetime.fromisoformat(timestamp).timestamp())
 
 
-def blocks(records: list[dict[str, Any]], whole: bool = False, since: str = "") -> list[Block]:
+def blocks(
+    records: list[dict[str, Any]], whole: bool = False, since: str = "", tip: bool = False
+) -> list[Block]:
     """The conversation, in the order it happened, as the shape a reader wants.
 
     The one parser. Everywhere a conversation is shown — the terminal, the
@@ -391,7 +393,8 @@ def blocks(records: list[dict[str, Any]], whole: bool = False, since: str = "") 
     """
     nodes = [r for r in records if r.get("type") in NODE_TYPES and r.get("uuid")]
     if not whole:
-        nodes = _active_branch(nodes, _sidecar_state(records).get("leafUuid"))
+        leaf_uuid = None if tip else _sidecar_state(records).get("leafUuid")
+        nodes = _active_branch(nodes, leaf_uuid)
     if since:
         nodes = _after(nodes, since)
     boundaries = {c.uuid for c in _compactions("", records)}

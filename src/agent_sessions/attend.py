@@ -151,7 +151,11 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
     log.say(f"#{issue.number} {len(waiting)} waiting")
     answered = 0
     for prompt in waiting:
-        log.say(f"#{issue.number} picked up: {_oneline(prompt.body)}")
+        if prompt not in pending(control.comments(issue.number), _seen(session, issue)):
+            log.say(f"#{issue.number} skipping {prompt.id}: the session has it already")
+            control.mark_done(prompt.id)
+            continue
+        log.say(f"#{issue.number} picked up {prompt.id}: {_oneline(prompt.body)}")
         # The eyes first: a turn takes minutes, and without them it looks from
         # the park like the prompt fell on the floor.
         control.take_up(prompt.id)
@@ -322,6 +326,18 @@ def _plain(text: str) -> str:
     return " ".join(text.split())
 
 
+def _seen(session: dict[str, Any] | None, issue: channel.Issue) -> list[Block]:
+    """What the session holds right now, read fresh.
+
+    Asked again before each turn rather than once for the pass: a pass consumes
+    as it goes, so a prompt sent twice was still on the list after the first
+    copy had put that very text into the session.
+    """
+    if session is None:
+        return []
+    return index.SOURCES[session["agent"]].blocks(Path(session["path"]), since=window(issue))
+
+
 def _cut_off_note(cut_off: bool) -> str:
     """A half-answer passed off as an answer is the worst thing this can do."""
     if not cut_off:
@@ -414,7 +430,7 @@ def run_turn(
         cwd=session["cwd"],
         native_id=session["native_id"],
         prompt=prompt,
-        watching=lambda: source.blocks(path, since=before),
+        watching=lambda: source.blocks(path, since=before, tip=True),
         showing=showing,
     )
     blocks = source.blocks(path, since=before)
