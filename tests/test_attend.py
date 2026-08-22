@@ -44,14 +44,32 @@ class FakeChannel:
         return self.comments_.get(number, [])
 
     def post(self, number: int, body: str) -> int:
+        """Writes are visible to reads, as they are on GitHub.
+
+        The double used to record a write and go on returning the old list, so
+        reconciling could not see the comment a turn had just written and
+        posted a second one. A double that cannot see its own writes agrees
+        with whatever you believed.
+        """
         self.posted.append((number, body))
-        return 900 + len(self.posted)
+        made = 900 + len(self.posted)
+        self.comments_.setdefault(number, []).append(
+            channel.Comment(id=made, body=body, author="agent[bot]")
+        )
+        return made
 
     def edit(self, comment_id: int, body: str) -> None:
         self.edited.append((comment_id, body))
+        for number, cs in self.comments_.items():
+            self.comments_[number] = [
+                channel.Comment(id=c.id, body=body, author=c.author) if c.id == comment_id else c
+                for c in cs
+            ]
 
     def delete(self, comment_id: int) -> None:
         self.deleted.append(comment_id)
+        for number, cs in self.comments_.items():
+            self.comments_[number] = [c for c in cs if c.id != comment_id]
 
     def take_up(self, comment_id: int) -> None:
         self.taken.append(comment_id)
@@ -185,17 +203,22 @@ def test_a_session_open_in_a_terminal_is_taken_over(
     assert turns[0]["prompt"] == "try it with -x"
 
 
-def test_taking_a_session_over_is_said_in_the_thread(
-    turns: list[dict], found, monkeypatch: pytest.MonkeyPatch
+def test_taking_a_session_over_is_said(
+    turns: list[dict], found, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
-    """Coming home to a closed pane should not be a mystery."""
+    """Coming home to a closed pane should not be a mystery.
+
+    Said in the log rather than the comment: the comment is a rendering of the
+    session, and this is a fact about the operation, which the session has no
+    record of. Written into the rendering it would be dropped on the next pass.
+    """
     monkeypatch.setattr(
         index.SOURCES["claude"], "live", lambda: {"7e90": Running(pid=42, status="idle")}
     )
     monkeypatch.setattr(attend, "take_over", lambda pid: None)
     c = FakeChannel([issue()], {4: [prompt()]})
     attend.once(c, conn=None)
-    assert "terminal" in c.edited[-1][1].lower()
+    assert "terminal" in capsys.readouterr().err.lower()
 
 
 def test_an_issue_naming_no_session_is_said_to_be_wrong(turns: list[dict], found) -> None:
@@ -391,13 +414,6 @@ def test_the_answer_replaces_that_comment_rather_than_adding_one(turns: list[dic
     assert channel.RUNNING not in c.edited[-1][1]
 
 
-def test_the_finished_comment_carries_the_marker(turns: list[dict], found) -> None:
-    """Nothing else keeps the loop finite for comments the bot did not author."""
-    c = FakeChannel([issue()], {4: [prompt()]})
-    attend.once(c, conn=None)
-    assert c.edited[-1][1].startswith(channel.MARKER)
-
-
 def test_a_stale_progress_comment_does_not_count_as_an_answer(turns: list[dict], found) -> None:
     """What a killed turn leaves: the prompt is still unanswered and gets retried."""
     stale = channel.Comment(id=13, body=f"{channel.RUNNING}\nWorking…", author="a[bot]")
@@ -507,13 +523,6 @@ def test_a_rewind_does_not_also_run_the_prompt_it_undid(
     assert turns == []
 
 
-def test_the_answer_records_the_point_it_can_be_rewound_to(turns: list[dict], found) -> None:
-    """Without this the tap has nowhere to go, and the rewind is only a design."""
-    c = FakeChannel([issue()], {4: [prompt()]})
-    attend.once(c, conn=None)
-    assert comment.point(c.edited[-1][1]) == "leafbefore"
-
-
 def test_prompts_that_piled_up_are_all_still_waiting(turns: list[dict], found) -> None:
     """Three in a row while the loop was down, and the session has none of them.
 
@@ -564,13 +573,13 @@ def test_the_hold_names_the_agent_once_it_has_been_spawned(monkeypatch, tmp_path
 
 
 def test_an_interrupted_turn_is_said_to_be_interrupted(
-    turns: list[dict], found, monkeypatch
+    turns: list[dict], found, monkeypatch, capsys
 ) -> None:
     """A half-answer passed off as an answer is the worst thing this can do."""
     monkeypatch.setattr(attend.attending, "interrupted", lambda native: True)
     c = FakeChannel([issue()], {4: [prompt()]})
     attend.once(c, conn=None)
-    assert "cut off" in c.edited[-1][1].lower()
+    assert "cut off" in capsys.readouterr().err.lower()
 
 
 def test_a_pass_does_not_swallow_a_credential_failure(monkeypatch, capsys) -> None:
@@ -686,7 +695,7 @@ def test_a_prompt_a_rendering_says_it_answered_is_not_run_again(
     transcript(monkeypatch)
     claimed = channel.Comment(
         id=50,
-        body=comment.render_turn(comment.Turn("u1", "q", []), asked_by=11),
+        body=comment.render_turn(comment.Turn("u1", "q", []), marks={comment.BY: "11"}),
         author="a[bot]",
     )
     c = FakeChannel([issue()], {4: [prompt(11, "asked"), claimed]})

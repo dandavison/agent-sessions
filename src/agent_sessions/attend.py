@@ -201,12 +201,15 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
             f"{tag} answered in {time.monotonic() - started:.0f}s"
             f" — {len(blocks)} blocks, ${summary.get('total_cost_usd', 0):.2f}"
         )
+        if displaced or cut_off:
+            log.say(
+                f"{tag} {displaced or ''}{'turn before was cut off' if cut_off else ''}".strip()
+            )
+        turn = next((t for t in comment.turns(blocks) if t.key), None)
         body = (
-            channel.MARKER
-            + "\n"
-            + displaced
-            + _cut_off_note(cut_off)
-            + comment.render(blocks, summary, at_uuid=before)
+            comment.render_turn(turn, marks={comment.BY: str(prompt.id), comment.AT: before})
+            if turn
+            else comment.render(blocks, summary)
         )
         control.edit(note, body)
         log.say(f"{tag} posted {len(body):,} chars")
@@ -290,9 +293,18 @@ def reconcile(control: Control, issue: channel.Issue, session: dict[str, Any] | 
     if session is None:
         return
     blocks = index.SOURCES[session["agent"]].blocks(Path(session["path"]), since=window(issue))
-    want = {t.key: comment.render_turn(t) for t in comment.turns(blocks)[-MOST:] if t.key}
     comments = control.comments(issue.number)
     have = {comment.turn_key(c.body): c for c in comments if c.is_ours and comment.turn_key(c.body)}
+    # Carrying over what only the thread knew — which comment asked, where to
+    # rewind to. Re-rendered from the transcript alone they would be dropped on
+    # the pass after the one that wrote them.
+    want = {
+        t.key: comment.render_turn(
+            t, marks=comment.marks_of(have[t.key].body) if t.key in have else None
+        )
+        for t in comment.turns(blocks)[-MOST:]
+        if t.key
+    }
     made = changed = gone = 0
     for key, body in want.items():
         if key not in have:
@@ -364,18 +376,8 @@ def _seen(session: dict[str, Any] | None) -> list[Block]:
     return index.SOURCES[session["agent"]].blocks(Path(session["path"]))
 
 
-def _cut_off_note(cut_off: bool) -> str:
-    """A half-answer passed off as an answer is the worst thing this can do."""
-    if not cut_off:
-        return ""
-    return (
-        "<sub>The turn before this one was cut off part way; what it had done is in"
-        " the session. Say so if you want it carried on.</sub>\n\n"
-    )
-
-
 def _clear_the_way(session: dict[str, Any]) -> str:
-    """Take the session off whatever else holds it, and say so.
+    """Take the session off whatever else holds it, and say which.
 
     Two agents on one transcript fork it and then fight over the `last-prompt`
     record that says which branch is live. One of them has to go, and it is not
@@ -388,10 +390,7 @@ def _clear_the_way(session: dict[str, Any]) -> str:
     log.say(f"taking {session['id']} over from pid {running.pid} ({running.status})")
     take_over(running.pid)
     log.say(f"pid {running.pid} has gone")
-    return (
-        f"<sub>Taken over from a terminal ({running.status});"
-        " resume it to pick it back up.</sub>\n\n"
-    )
+    return f"taken over from a terminal ({running.status})"
 
 
 def _oneline(text: str) -> str:

@@ -122,10 +122,22 @@ def turns(blocks: list[Block]) -> list[Turn]:
     return found
 
 
-def render_turn(turn: Turn, asked_by: int = 0, summary: dict[str, Any] | None = None) -> str:
-    """One turn as the comment that stands for it, and says which turn it is."""
-    marks = _mark(FOR, turn.key) + (_mark(BY, str(asked_by)) if asked_by else "")
-    return _fit(marks + "\n" + render(turn.blocks, summary))
+def render_turn(turn: Turn, marks: dict[str, str] | None = None) -> str:
+    """One turn as the comment that stands for it, and says which turn it is.
+
+    `marks` carries the few things the transcript cannot supply — which comment
+    asked, where to rewind to — so that re-rendering keeps them rather than
+    quietly dropping them on the next pass.
+    """
+    written = _mark(FOR, turn.key) + "".join(
+        _mark(name, value) for name, value in (marks or {}).items() if value
+    )
+    return _fit(written + "\n" + render(turn.blocks))
+
+
+def marks_of(body: str) -> dict[str, str]:
+    """What a rendering was carrying, so rewriting it does not lose it."""
+    return {name: found for name in (BY, AT) if (found := _read(name, body))}
 
 
 def turn_key(body: str) -> str:
@@ -156,7 +168,7 @@ def point(body: str) -> str:
     return found.group(1) if found else ""
 
 
-def render(blocks: list[Block], summary: dict[str, Any] | None = None, at_uuid: str = "") -> str:
+def render(blocks: list[Block], summary: dict[str, Any] | None = None) -> str:
     """A turn as the comment to post for it: a formatter over the one parser.
 
     The same blocks the terminal and the pages are shown, so a conversation
@@ -180,7 +192,7 @@ def render(blocks: list[Block], summary: dict[str, Any] | None = None, at_uuid: 
     # Said first, run second, each in the order it happened. A turn answers
     # last, and a comment opens at the top: posted chronologically, the answer
     # sits under every fold and has to be scrolled to on a phone.
-    parts = [at(at_uuid) if at_uuid else "", *said, *ran, _footer(summary)]
+    parts = [*said, *ran, _footer(summary)]
     return _fit(redact("\n\n".join(p for p in parts if p)))
 
 

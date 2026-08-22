@@ -157,18 +157,22 @@ def test_the_frontmatter_survives_a_round_trip() -> None:
 
 def test_an_answer_records_where_the_session_was_before_it() -> None:
     """Rewinding needs a transcript point, and a comment is what I tap to ask for it."""
-    out = comment.render([said("Done.")], DONE, at_uuid="9f3c1d20")
+    turn = comment.Turn("u1", "why?", [said("Done.")])
+    out = comment.render_turn(turn, marks={comment.AT: "9f3c1d20"})
     assert comment.point(out) == "9f3c1d20"
 
 
 def test_an_answer_without_a_point_has_none_to_read_back() -> None:
-    assert comment.point(comment.render([said("Done.")], DONE)) == ""
+    assert comment.point(comment.render_turn(comment.Turn("u1", "why?", [said("Done.")]))) == ""
 
 
-def test_the_point_is_not_visible_in_the_rendered_comment() -> None:
-    """An HTML comment: on the page it is nothing, in the body it is durable."""
-    out = comment.render([said("Done.")], DONE, at_uuid="9f3c1d20")
-    assert "9f3c1d20" not in out.replace(comment.at("9f3c1d20"), "")
+def test_what_only_the_thread_knew_survives_a_re_rendering() -> None:
+    """Re-rendering from the transcript would otherwise drop them every pass."""
+    turn = comment.Turn("u1", "why?", [said("Done.")])
+    was = comment.render_turn(turn, marks={comment.AT: "9f3c1d20", comment.BY: "42"})
+    again = comment.render_turn(turn, marks=comment.marks_of(was))
+    assert comment.point(again) == "9f3c1d20"
+    assert comment.asked_by(again) == 42
 
 
 # --- the thread as a projection of the session -------------------------------
@@ -208,6 +212,6 @@ def test_a_rendered_turn_says_which_turn_it_is() -> None:
 def test_a_rendered_turn_says_which_comment_asked_for_it() -> None:
     """The thread owns its own ids, so consumption is recorded where it is known."""
     (turn,) = comment.turns([asked("why?", "u1"), said("because")])
-    body = comment.render_turn(turn, asked_by=4242)
+    body = comment.render_turn(turn, marks={comment.BY: "4242"})
     assert comment.asked_by(body) == 4242
     assert comment.asked_by(comment.render_turn(turn)) == 0
