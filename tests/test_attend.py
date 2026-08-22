@@ -74,8 +74,8 @@ def issue(session_id: str = "claude:7e90") -> channel.Issue:
     return channel.Issue(number=4, title="t", body=f"| session | {session_id} |", url="")
 
 
-def prompt(id: int = 11, body: str = "try it with -x", taken: bool = False) -> channel.Comment:
-    return channel.Comment(id=id, body=body, author="dandavison", taken_up=taken)
+def prompt(id: int = 11, body: str = "try it with -x") -> channel.Comment:
+    return channel.Comment(id=id, body=body, author="dandavison")
 
 
 @pytest.fixture
@@ -83,7 +83,7 @@ def turns(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     """What the agent was asked to do, without asking it."""
     ran: list[dict] = []
 
-    def fake(session: dict, text: str, showing=None) -> tuple[list[Said], dict, str]:
+    def fake(session: dict, text: str, showing=None, tag="") -> tuple[list[Said], dict, str]:
         ran.append({"session": session["id"], "prompt": text})
         return [Said(role="assistant", text="Done.")], {}, "leafbefore"
 
@@ -137,7 +137,7 @@ def test_the_eyes_alone_do_not_mean_a_prompt_is_done(turns: list[dict], found) -
     Eyes with no reply is what a turn killed part way leaves behind, and
     treating it as done is what dropped that work. A reply is what settles it.
     """
-    c = FakeChannel([issue()], {4: [prompt(taken=True)]})
+    c = FakeChannel([issue()], {4: [prompt()]})
     attend.once(c, conn=None)
     assert turns[0]["prompt"] == "try it with -x"
 
@@ -354,7 +354,7 @@ def test_a_prompt_whose_turn_never_finished_is_picked_up_again(turns: list[dict]
     With them as the record, a turn interrupted by a restart was never retried
     and never replied to — the work was in the transcript and nowhere else.
     """
-    interrupted = prompt(11, "the one that was cut off", taken=True)
+    interrupted = prompt(11, "the one that was cut off")
     c = FakeChannel([issue()], {4: [interrupted]})
     attend.once(c, conn=None)
     assert turns[0]["prompt"] == "the one that was cut off"
@@ -363,7 +363,7 @@ def test_a_prompt_whose_turn_never_finished_is_picked_up_again(turns: list[dict]
 def test_a_prompt_that_was_answered_is_left_alone(turns: list[dict], found, monkeypatch) -> None:
     """Settled by the session having taken it in, not by a reply sitting near it."""
     transcript(monkeypatch, said_by_me("already done", "u1"), Said("assistant", "Done."))
-    c = FakeChannel([issue()], {4: [prompt(11, "already done", taken=True)]})
+    c = FakeChannel([issue()], {4: [prompt(11, "already done")]})
     attend.once(c, conn=None)
     assert turns == []
 
@@ -396,7 +396,7 @@ def test_the_finished_comment_carries_the_marker(turns: list[dict], found) -> No
 def test_a_stale_progress_comment_does_not_count_as_an_answer(turns: list[dict], found) -> None:
     """What a killed turn leaves: the prompt is still unanswered and gets retried."""
     stale = channel.Comment(id=13, body=f"{channel.RUNNING}\nWorking…", author="a[bot]")
-    c = FakeChannel([issue()], {4: [prompt(11, "cut off", taken=True), stale]})
+    c = FakeChannel([issue()], {4: [prompt(11, "cut off"), stale]})
     attend.once(c, conn=None)
     assert turns[0]["prompt"] == "cut off"
 
@@ -655,7 +655,7 @@ def test_a_prompt_already_in_the_session_is_not_run_again(found, monkeypatch) ->
     """
     ran: list[str] = []
     monkeypatch.setattr(
-        attend, "run_turn", lambda s, t, showing=None: (ran.append(t), ([], {}, ""))[1]
+        attend, "run_turn", lambda s, t, showing=None, tag="": (ran.append(t), ([], {}, ""))[1]
     )
     transcript(monkeypatch, said_by_me("already asked", "u1"), Said("assistant", "done"))
     c = FakeChannel([issue()], {4: [prompt(11, "already asked")]})
@@ -706,7 +706,7 @@ def test_the_same_prompt_sent_twice_runs_once(turns: list[dict], found, monkeypa
     """
     consumed: list[Block] = []
 
-    def fake(session, text, showing=None):
+    def fake(session, text, showing=None, tag=""):
         consumed.append(Said(role="user", text=text, uuid=f"u{len(consumed)}"))
         return [Said(role="assistant", text="Done.")], {}, "before"
 
@@ -722,7 +722,7 @@ def test_two_different_prompts_in_one_pass_both_run(turns: list[dict], found, mo
     """Re-checking must not turn a queue of real prompts into a queue of one."""
     consumed: list[Block] = []
 
-    def fake(session, text, showing=None):
+    def fake(session, text, showing=None, tag=""):
         consumed.append(Said(role="user", text=text, uuid=f"u{len(consumed)}"))
         return [Said(role="assistant", text="Done.")], {}, "before"
 

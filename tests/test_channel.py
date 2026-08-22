@@ -124,17 +124,6 @@ def test_what_it_wrote_is_not_a_prompt() -> None:
     assert not channel.Comment(id=11, body=MINE_BODY, author="dandavison").is_ours
 
 
-def test_a_prompt_already_taken_up_is_not_taken_up_again() -> None:
-    """The eyes are the record that it was seen, and they live on GitHub.
-
-    The index is a derived cache that is safe to delete; keeping this there
-    would mean deleting it made the loop read its own output back as prompts.
-    """
-    reacted = MINE | {"reactions": {"eyes": 1}}
-    c = channel_over({"GET /repos/dandavison/agent-work/issues/4/comments": [reacted]})
-    assert c.comments(4)[0].taken_up
-
-
 # --- writing -----------------------------------------------------------------
 
 
@@ -443,3 +432,14 @@ def test_a_finished_prompt_is_marked_done_not_left_watched(monkeypatch) -> None:
         "/repos/dandavison/agent-work/issues/comments/11/reactions/77",
     ) in methods
     assert b"rocket" in seen[0].content
+
+
+def test_the_reactions_are_feedback_and_not_state() -> None:
+    """Nothing decides anything from them, and a field that looks live is a trap.
+
+    They were state once — the eyes meant `already taken up` — and every rule
+    built on them went wrong. What settles a prompt now is the session, so the
+    reactions are left to do the one thing they are good at: showing me, within
+    seconds and from a phone, that the thing is working.
+    """
+    assert not hasattr(channel.Comment(id=1, body="x", author="me"), "taken_up")

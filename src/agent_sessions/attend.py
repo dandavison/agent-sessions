@@ -155,13 +155,14 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
             log.say(f"#{issue.number} skipping {prompt.id}: the session has it already")
             control.mark_done(prompt.id)
             continue
-        log.say(f"#{issue.number} picked up {prompt.id}: {_oneline(prompt.body)}")
+        tag = f"#{issue.number}·{prompt.id}"
+        log.say(f"{tag} picked up: {_oneline(prompt.body)}")
         # The eyes first: a turn takes minutes, and without them it looks from
         # the park like the prompt fell on the floor.
         control.take_up(prompt.id)
-        log.detail(f"#{issue.number} eyes on comment {prompt.id}")
+        log.detail(f"{tag} eyes on")
         if session is None:
-            log.problem(f"#{issue.number} names {issue.session_id}, which is not a session")
+            log.problem(f"{tag} names {issue.session_id}, which is not a session")
             control.post(
                 issue.number,
                 f"No session matches `{issue.session_id}`. Fix the table in the issue body.",
@@ -169,20 +170,20 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
             continue
         displaced = _clear_the_way(session)
         cut_off = attending.interrupted(session["native_id"])
-        log.say(f"#{issue.number} running {session['id']} in {session['cwd']}")
+        log.say(f"{tag} running {session['id']} in {session['cwd']}")
         started = time.monotonic()
         # Before the turn, not after: the thread should show something within
         # seconds of asking, and this is the comment the answer will replace.
         note = control.post(issue.number, comment.working(prompt.body))
-        log.say(f"#{issue.number} working, in comment {note}")
+        log.say(f"{tag} working, in comment {note}")
         # Held for the length of the turn, so a resume from the terminal is
         # refused rather than opening a second agent on the same transcript.
         with attending.holding(session["native_id"]):
             blocks, summary, before = run_turn(
-                session, prompt.body, showing=_shown(control, note, started)
+                session, prompt.body, showing=_shown(control, note, started, tag), tag=tag
             )
         log.say(
-            f"#{issue.number} answered in {time.monotonic() - started:.0f}s"
+            f"{tag} answered in {time.monotonic() - started:.0f}s"
             f" — {len(blocks)} blocks, ${summary.get('total_cost_usd', 0):.2f}"
         )
         body = (
@@ -193,7 +194,7 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
             + comment.render(blocks, summary, at_uuid=before)
         )
         control.edit(note, body)
-        log.say(f"#{issue.number} posted {len(body):,} chars")
+        log.say(f"{tag} posted {len(body):,} chars")
         control.mark_done(prompt.id)
         answered += 1
     reconcile(control, issue, session)
@@ -201,7 +202,7 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
     return answered
 
 
-def _shown(control: Control, note: int, started: float) -> Callable[[list[Block]], None]:
+def _shown(control: Control, note: int, started: float, tag: str) -> Callable[[list[Block]], None]:
     """Write what has happened so far into the comment already on the page.
 
     An edit does not notify, so this costs nothing but a request; the one
@@ -210,7 +211,7 @@ def _shown(control: Control, note: int, started: float) -> Callable[[list[Block]
 
     def show(blocks: list[Block]) -> None:
         control.edit(note, comment.working("", blocks, time.monotonic() - started))
-        log.detail(f"showed {len(blocks)} blocks in comment {note}")
+        log.detail(f"{tag} showed {len(blocks)} blocks")
 
     return show
 
@@ -277,18 +278,24 @@ def reconcile(control: Control, issue: channel.Issue, session: dict[str, Any] | 
     want = {t.key: comment.render_turn(t) for t in comment.turns(blocks) if t.key}
     comments = control.comments(issue.number)
     have = {comment.turn_key(c.body): c for c in comments if c.is_ours and comment.turn_key(c.body)}
+    made = changed = gone = 0
     for key, body in want.items():
         if key not in have:
             control.post(issue.number, body)
+            made += 1
         elif have[key].body != body:
             control.edit(have[key].id, body)
+            changed += 1
     for key, stale in have.items():
         if key not in want:
             control.delete(stale.id)
+            gone += 1
     for litter in comments:
         if litter.is_progress:
             control.delete(litter.id)
-    log.detail(f"#{issue.number} reconciled: {len(want)} turns")
+            gone += 1
+    if made or changed or gone:
+        log.say(f"#{issue.number} reconciled: {made} posted, {changed} rewritten, {gone} deleted")
 
 
 def window(issue: channel.Issue) -> str:
@@ -410,7 +417,10 @@ def lookup(conn: Any, session_id: str) -> dict[str, Any] | None:
 
 
 def run_turn(
-    session: dict[str, Any], prompt: str, showing: Callable[[list[Block]], None] | None = None
+    session: dict[str, Any],
+    prompt: str,
+    showing: Callable[[list[Block]], None] | None = None,
+    tag: str = "",
 ) -> tuple[list[Block], dict[str, Any], str]:
     """One headless turn, in the directory the session was had in.
 
@@ -432,6 +442,7 @@ def run_turn(
         prompt=prompt,
         watching=lambda: source.blocks(path, since=before, tip=True),
         showing=showing,
+        tag=tag,
     )
     blocks = source.blocks(path, since=before)
     return (blocks or [_failed(done)]), _summary(done.stdout), before
@@ -444,6 +455,7 @@ def _spawn(
     prompt: str,
     watching: Callable[[], list[Block]],
     showing: Callable[[list[Block]], None] | None = None,
+    tag: str = "",
 ) -> subprocess.CompletedProcess[str]:
     """Run the turn, saying what it does while it does it.
 
@@ -469,7 +481,7 @@ def _spawn(
 
     worker = Thread(target=talk, daemon=True)
     worker.start()
-    watch(watching, alive=worker.is_alive, showing=showing)
+    watch(watching, alive=worker.is_alive, showing=showing, tag=tag)
     worker.join(TIMEOUT)
     _children.discard(proc)
     if worker.is_alive():
@@ -485,6 +497,7 @@ def watch(
     blocks: Callable[[], list[Block]],
     alive: Callable[[], bool],
     showing: Callable[[list[Block]], None] | None = None,
+    tag: str = "",
 ) -> None:
     """Report what the turn has done so far, until it stops running.
 
@@ -499,11 +512,11 @@ def watch(
     while alive():
         seen = blocks()
         for block in seen[reported:]:
-            log.say(f"  {_progress(block)}")
+            log.say(f"{tag}   {_progress(block)}")
             reported += 1
             quiet = time.monotonic()
         if time.monotonic() - quiet >= HEARTBEAT:
-            log.say(f"  still going ({reported} so far)")
+            log.say(f"{tag}   still going ({reported} so far)")
             quiet = time.monotonic()
         if showing and time.monotonic() - told >= SHOW:
             showing(seen)

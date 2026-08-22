@@ -43,7 +43,9 @@ API = "https://api.github.com"
 REPO = os.environ.get("AGENT_WORK_REPO", "dandavison/agent-work")
 
 # Posted the moment a prompt is picked up, so that a turn taking minutes still
-# shows something within seconds of asking for it.
+# shows something within seconds of asking for it. Feedback, not state: nothing
+# decides anything from these. They were state once, and every rule built on
+# them went wrong, because what settles a prompt is the session.
 SEEN = "eyes"
 
 # Swapped in when the turn lands. The eyes were added on pickup and never
@@ -107,7 +109,6 @@ class Comment:
     id: int
     body: str
     author: str
-    taken_up: bool = False
     rewind_wanted: bool = False
 
     @property
@@ -289,7 +290,6 @@ def _comment(raw: dict[str, Any]) -> Comment:
         id=raw["id"],
         body=raw.get("body") or "",
         author=(raw.get("user") or {}).get("login", ""),
-        taken_up=bool((raw.get("reactions") or {}).get(SEEN)),
         rewind_wanted=bool((raw.get("reactions") or {}).get(REWIND)),
     )
 
