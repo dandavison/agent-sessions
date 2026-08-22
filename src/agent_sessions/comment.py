@@ -16,6 +16,7 @@ machine and holds what a commit never would.
 """
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,12 @@ RUNNING = "<!-- agent-work:running -->"
 # Where the session was before the turn this comment answers. Rewinding is a
 # tap on a comment, so the comment is where the point has to live.
 AT = "agent-work:at"
+
+# Which turn a comment renders, and which comment asked for it. The first comes
+# from the transcript and makes the thread reconcilable; the second is the one
+# thing the transcript cannot know, because only the thread has its own ids.
+FOR = "agent-work:for"
+BY = "agent-work:by"
 
 # What GitHub accepts in one comment. Truncation is not a nicety: a test run
 # clears this on its own and the post would simply fail.
@@ -88,6 +95,55 @@ LANGUAGES = {
 
 # The file a tool is about, whichever of these it calls it.
 PATH_KEYS = ("file_path", "path", "notebook_path")
+
+
+@dataclass(frozen=True, slots=True)
+class Turn:
+    """What I asked, and everything that followed until I asked again."""
+
+    key: str
+    asked: str
+    blocks: list[Block]
+
+
+def turns(blocks: list[Block]) -> list[Turn]:
+    """The conversation as turns, which is the unit the thread shows.
+
+    Work before the first thing I said is not a turn: a window can open in the
+    middle of a session, and the tail of an earlier exchange is not mine to
+    render as an answer.
+    """
+    found: list[Turn] = []
+    for block in blocks:
+        if isinstance(block, Said) and block.role == "user":
+            found.append(Turn(key=block.uuid, asked=block.text, blocks=[]))
+        elif found:
+            found[-1].blocks.append(block)
+    return found
+
+
+def render_turn(turn: Turn, asked_by: int = 0, summary: dict[str, Any] | None = None) -> str:
+    """One turn as the comment that stands for it, and says which turn it is."""
+    marks = _mark(FOR, turn.key) + (_mark(BY, str(asked_by)) if asked_by else "")
+    return _fit(marks + "\n" + render(turn.blocks, summary))
+
+
+def turn_key(body: str) -> str:
+    return _read(FOR, body)
+
+
+def asked_by(body: str) -> int:
+    found = _read(BY, body)
+    return int(found) if found.isdigit() else 0
+
+
+def _mark(name: str, value: str) -> str:
+    return f"<!-- {name} {value} -->\n"
+
+
+def _read(name: str, body: str) -> str:
+    found = re.search(rf"<!--\s*{name}\s+(\S+)\s*-->", body)
+    return found.group(1) if found else ""
 
 
 def at(uuid: str) -> str:
