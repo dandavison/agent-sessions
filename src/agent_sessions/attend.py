@@ -115,6 +115,8 @@ def a_pass(control: Control, conn: Any) -> int:
     """
     try:
         return once(control, conn)
+    except channel.NotAuthorized:
+        raise
     except Exception as e:  # noqa: BLE001 — the loop outliving the pass is the point
         log.problem(f"{type(e).__name__}: {e}")
         return 0

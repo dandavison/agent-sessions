@@ -64,6 +64,26 @@ _minted: tuple[str, float] = ("", 0.0)
 _ACCEPT = "application/vnd.github+json"
 
 
+class NotAuthorized(Exception):
+    """The credential is wrong, which is not something waiting will fix.
+
+    Distinguished from every other failure because the loop retries those, and
+    retrying this one produces an afternoon of identical lines and no work.
+    """
+
+
+def _refuses(response: httpx.Response) -> bool:
+    """Whether GitHub is refusing us rather than merely having a bad moment.
+
+    A 403 is also how a rate limit arrives, and that one does come right on its
+    own; the remaining-count is what tells them apart.
+    """
+    if response.status_code == 401:
+        return True
+    limited = response.headers.get("x-ratelimit-remaining") == "0"
+    return response.status_code == 403 and not limited
+
+
 class NoToken(Exception):
     def __init__(self, why: str = "No GitHub token. Run `gh auth login`.") -> None:
         super().__init__(why)
@@ -206,6 +226,8 @@ class Channel:
         headers = {"If-None-Match": tag} if (tag := self._etags.get(path)) else {}
         response = self.client.get(path, params=params, headers=headers)
         log.detail(f"GET {path} -> {response.status_code}")
+        if _refuses(response):
+            raise NotAuthorized(f"GitHub refused us: {response.status_code} on {path}")
         if response.status_code == 304:
             return self._cached.get(path, [])
         response.raise_for_status()
@@ -219,6 +241,8 @@ class Channel:
         self._authorize()
         response = self.client.request(method, path, json=payload)
         log.detail(f"{method} {path} -> {response.status_code}")
+        if _refuses(response):
+            raise NotAuthorized(f"GitHub refused us: {response.status_code} on {path}")
         response.raise_for_status()
         return response.json() if response.content else {}
 

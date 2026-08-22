@@ -549,6 +549,10 @@ def _attending(run: Callable[[], None]) -> None:
         run()
     except attending.AlreadyAttending as e:
         raise click.UsageError(str(e)) from e
+    except channel.NotAuthorized as e:
+        raise click.UsageError(
+            f"{e} Check AGENT_WORK_APP_ID and AGENT_WORK_APP_KEY, or `gh auth status`."
+        ) from e
 
 
 def _announce(urls: list[str]) -> None:
