@@ -133,10 +133,15 @@ def a_pass(control: Control, conn: Any) -> int:
         return 0
 
 
-def once(control: Control, conn: Any) -> int:
-    """One pass over every open issue. Returns how many prompts were answered."""
+def once(control: Control, conn: Any, only: int | None = None) -> int:
+    """One pass over the open issues. Returns how many prompts were answered.
+
+    `only` confines it to one. A pass that reaches every issue cannot be tried
+    against the real repo without touching the ones I am actually using, which
+    is exactly what happened the first time this was exercised for real.
+    """
     answered = 0
-    issues = control.issues()
+    issues = [i for i in control.issues() if only is None or i.number == only]
     log.detail(f"polled: {len(issues)} open")
     for issue in issues:
         if not issue.session_id:
@@ -150,6 +155,16 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
         return 0
     session = lookup(conn, issue.session_id)
     waiting = pending(control.comments(issue.number), _seen(session))
+    if waiting and session is None:
+        # One fact about the issue, so it is said once. Said per prompt, a
+        # stale index turns into a thread full of the same sentence.
+        log.problem(f"#{issue.number} names {issue.session_id}, which is not a session")
+        control.post(
+            issue.number,
+            f"{channel.MARKER}\nNo session matches `{issue.session_id}`."
+            " Fix the table in the issue body.",
+        )
+        return 0
     if not waiting:
         reconcile(control, issue, session)
         return 0
@@ -166,13 +181,7 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
         # the park like the prompt fell on the floor.
         control.take_up(prompt.id)
         log.detail(f"{tag} eyes on")
-        if session is None:
-            log.problem(f"{tag} names {issue.session_id}, which is not a session")
-            control.post(
-                issue.number,
-                f"No session matches `{issue.session_id}`. Fix the table in the issue body.",
-            )
-            continue
+        assert session is not None
         displaced = _clear_the_way(session)
         cut_off = attending.interrupted(session["native_id"])
         log.say(f"{tag} running {session['id']} in {session['cwd']}")

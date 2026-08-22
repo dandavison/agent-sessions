@@ -477,3 +477,13 @@ def test_a_short_thread_costs_one_request() -> None:
     c = channel_over({"GET /repos/dandavison/agent-work/issues/4/comments": [MINE]}, seen)
     c.comments(4)
     assert len(seen) == 1
+
+
+def test_one_issue_can_be_fetched_without_the_list() -> None:
+    """The list is eventually consistent — a new issue took five seconds to appear.
+
+    Measured against the real repo. Harmless while polling, since the next
+    pass finds it, but naming an issue should not depend on a list catching up.
+    """
+    c = channel_over({"GET /repos/dandavison/agent-work/issues/4": ISSUE})
+    assert c.issue(4).session_id == "claude:7e90"

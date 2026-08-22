@@ -10,6 +10,10 @@ So this drives the real channel: a scratch issue, a synthetic transcript, and a
 stubbed agent. The agent is stubbed because it is not what breaks; the channel
 and the reconciler are.
 
+Every pass names its issue. The first run of this reached into the two issues I
+actually use and posted on both, which is the sort of thing a suite of doubles
+will never tell you.
+
     AGENT_WORK_LIVE=1 uv run pytest tests/test_live.py
 
 Off by default. It creates and closes an issue in the control repo, and costs
@@ -73,7 +77,7 @@ def test_a_prompt_is_answered_once_and_the_thread_settles(scratch, live, monkeyp
     monkeypatch.setattr(attend, "run_turn", _answers(scratch))
 
     mine = control.post(issue.number, "what is two and two?")
-    attend.once(control, conn=None)
+    attend.once(control, conn=None, only=issue.number)
 
     after_one = control.comments(issue.number)
     renderings = [c for c in after_one if comment.turn_key(c.body)]
@@ -82,7 +86,7 @@ def test_a_prompt_is_answered_once_and_the_thread_settles(scratch, live, monkeyp
     assert comment.asked_by(renderings[0].body) == mine
 
     settled = _fresh(control).comments(issue.number)
-    attend.once(_fresh(control), conn=None)
+    attend.once(_fresh(control), conn=None, only=issue.number)
     assert len(_fresh(control).comments(issue.number)) == len(settled), "a second pass adds nothing"
 
 
@@ -103,7 +107,7 @@ def test_the_eyes_become_a_rocket(scratch, live, monkeypatch) -> None:
     control, issue = live
     monkeypatch.setattr(attend, "run_turn", _answers(scratch))
     mine = control.post(issue.number, "what is two and two?")
-    attend.once(control, conn=None)
+    attend.once(control, conn=None, only=issue.number)
 
     reactions = control._get(f"/repos/{control.repo}/issues/comments/{mine}/reactions")
     kinds = {r["content"] for r in reactions}

@@ -817,3 +817,21 @@ def test_a_session_that_has_gone_is_said_once_not_once_per_prompt(turns: list[di
     attend.once(c, conn=None)
     assert len(c.posted) == 1
     assert "claude:gone" in c.posted[0][1]
+
+
+def test_naming_an_issue_asks_for_it_rather_than_searching(turns: list[dict], found) -> None:
+    """The list lags behind creation, so a named issue is fetched by name."""
+    asked: list[int] = []
+
+    class Direct(FakeChannel):
+        def issues(self):
+            raise AssertionError("a named issue must not need the list")
+
+        def issue(self, number: int) -> channel.Issue:
+            asked.append(number)
+            return issue()
+
+    c = Direct([], {4: [prompt(11, "for four")]})
+    attend.once(c, conn=None, only=4)
+    assert asked == [4]
+    assert [t["prompt"] for t in turns] == ["for four"]
