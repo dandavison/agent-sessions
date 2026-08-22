@@ -22,6 +22,7 @@ from agent_sessions import (
     db,
     display,
     index,
+    limits,
     log,
     query,
     render,
@@ -459,13 +460,18 @@ def issue(id: str, fmt: str | None, as_json: bool, quiet: bool) -> None:
 )
 @click.option("--once", "single", is_flag=True, help="One pass, rather than staying up.")
 @click.option("--verbose", is_flag=True, help="Say something on every poll, not just events.")
-def attend_channel(interval: float, single: bool, verbose: bool) -> None:
+@click.option("--reset", is_flag=True, help="Clear the breaker and say what tripped it.")
+def attend_channel(interval: float, single: bool, verbose: bool, reset: bool) -> None:
     """Answer prompts left on the control channel, until interrupted.
 
     Polls for comments, runs each turn in the worktree its session belongs to,
     and posts the result back. A turn runs under my own settings, so a comment
     on the issue is allowed whatever I am allowed.
     """
+    if reset:
+        was = limits.reset()
+        click.echo(f"Cleared: {was}" if was else "It was not tripped.")
+        return
     log.VERBOSE = verbose
     conn = db.connect()
     control = channel.Channel()

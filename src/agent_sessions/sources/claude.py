@@ -21,6 +21,7 @@ from uuid import uuid4
 
 import orjson
 
+from agent_sessions import limits
 from agent_sessions.models import (
     Block,
     Boundary,
@@ -95,7 +96,18 @@ class ClaudeSource:
         # all that is wanted from the process is the closing summary. My own
         # settings apply, deliberately — a turn from the channel is allowed
         # exactly what a turn at the keyboard is.
-        return ["claude", "-p", "--resume", native_id, "--output-format", "json"]
+        return [
+            "claude",
+            "-p",
+            "--resume",
+            native_id,
+            "--output-format",
+            "json",
+            # Enforced by the agent, not noticed by us afterwards. Nothing else
+            # here bounds a single turn that runs away inside itself.
+            "--max-budget-usd",
+            str(limits.PER_TURN_USD),
+        ]
 
     def resumable_from(self, path: Path, cwd: str) -> bool:
         return path.parent.name == encode(cwd)

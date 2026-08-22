@@ -28,6 +28,7 @@ import os
 import subprocess
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +61,10 @@ DONE = "rocket"
 # the way it was before this. Cheap to notice — the reaction summary comes back
 # with every comment already.
 REWIND = "-1"
+
+# Seen and deliberately not run, because it was already stale when we found it.
+# Visible from the phone, so a prompt that will never be answered says so.
+IGNORED = "confused"
 
 # The app, when there is one. Named rather than discovered, so that running
 # without it is a choice and not an accident.
@@ -113,6 +118,10 @@ class Comment:
     body: str
     author: str
     rewind_wanted: bool = False
+    # Epoch seconds. A prompt old enough that the loop never saw it live is
+    # never run: coming back and doing everything said while it was down is
+    # the one behaviour that must not exist.
+    created: float = 0.0
 
     @property
     def is_ours(self) -> bool:
@@ -235,6 +244,13 @@ class Channel:
             "POST", f"/repos/{self.repo}/issues/comments/{comment_id}/reactions", {"content": SEEN}
         )
 
+    def react(self, comment_id: int, content: str) -> None:
+        self._send(
+            "POST",
+            f"/repos/{self.repo}/issues/comments/{comment_id}/reactions",
+            {"content": content},
+        )
+
     def mark_done(self, comment_id: int) -> None:
         """Swap the eyes for a rocket: this one is answered, not merely noticed."""
         self._send(
@@ -348,7 +364,14 @@ def _comment(raw: dict[str, Any]) -> Comment:
         body=raw.get("body") or "",
         author=(raw.get("user") or {}).get("login", ""),
         rewind_wanted=bool((raw.get("reactions") or {}).get(REWIND)),
+        created=_when(raw.get("created_at")),
     )
+
+
+def _when(stamp: str | None) -> float:
+    if not stamp:
+        return 0.0
+    return datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
 
 
 def _headers() -> dict[str, str]:

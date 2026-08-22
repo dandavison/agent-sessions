@@ -670,7 +670,7 @@ def test_a_turn_is_resumed_headlessly_and_asked_only_for_its_summary() -> None:
     between a comment and this machine is who can reach the repo, and nothing
     else.
     """
-    assert ClaudeSource().turn_command("7e90") == [
+    assert ClaudeSource().turn_command("7e90")[:6] == [
         "claude",
         "-p",
         "--resume",
@@ -678,6 +678,18 @@ def test_a_turn_is_resumed_headlessly_and_asked_only_for_its_summary() -> None:
         "--output-format",
         "json",
     ]
+
+
+def test_a_turn_is_given_a_budget_it_cannot_exceed() -> None:
+    """The only bound on a turn that runs away inside itself.
+
+    Everything else here counts prompts; nothing else stops one turn spending
+    without limit. The agent enforces this on itself, which is why it is a flag
+    rather than something noticed afterwards from the summary.
+    """
+    command = ClaudeSource().turn_command("7e90")
+    assert "--max-budget-usd" in command
+    assert float(command[command.index("--max-budget-usd") + 1]) > 0
 
 
 def test_a_transcript_being_written_to_can_still_be_read(tmp_path: Path) -> None:

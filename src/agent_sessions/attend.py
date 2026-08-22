@@ -31,7 +31,7 @@ from typing import Any, Protocol
 
 import orjson
 
-from agent_sessions import attending, channel, comment, index, log, query
+from agent_sessions import attending, channel, comment, index, limits, log, query
 from agent_sessions.models import Block, Ran, Said
 
 # A poll that finds nothing returns 304 and costs no rate limit, so this is
@@ -44,6 +44,9 @@ _children: set[subprocess.Popen[str]] = set()
 # How many turns an issue shows when it does not say where to start. The old
 # ones say nothing, and a whole session is neither readable nor cheap.
 MOST = 20
+
+# Prompts too old to run, so that saying so happens once rather than per pass.
+_dismissed: set[int] = set()
 
 # What each issue last reconciled to, so "nothing changed" is said once rather
 # than once a second.
@@ -83,6 +86,7 @@ class Control(Protocol):
     def edit(self, comment_id: int, body: str) -> None: ...
     def delete(self, comment_id: int) -> None: ...
     def take_up(self, comment_id: int) -> None: ...
+    def react(self, comment_id: int, content: str) -> None: ...
     def mark_done(self, comment_id: int) -> None: ...
     def set_body(self, number: int, body: str) -> None: ...
     def open(self, title: str, body: str) -> channel.Issue: ...
@@ -118,6 +122,7 @@ def loop(control: Control, conn: Any, interval: float = INTERVAL) -> None:
         waiting = interval
         try:
             while True:
+                limits.guard()  # noqa: B018 — raises out of the loop when tripped
                 control.fresh = False
                 stirred = a_pass(control, conn) or control.fresh
                 was, waiting = waiting, interval if stirred else min(QUIETEST, waiting * 2)
@@ -145,7 +150,7 @@ def a_pass(control: Control, conn: Any) -> int:
     """
     try:
         return once(control, conn)
-    except channel.NotAuthorized:
+    except (channel.NotAuthorized, limits.Tripped):
         raise
     except Exception as e:  # noqa: BLE001 — the loop outliving the pass is the point
         log.problem(f"{type(e).__name__}: {e}")
@@ -171,6 +176,20 @@ def once(control: Control, conn: Any, only: int | None = None) -> int:
 
 
 def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
+    try:
+        return _attending(control, conn, issue)
+    except limits.Tripped as stopped:
+        # Said on the issue, because the alternative is standing in the park
+        # waiting for a reply that is never coming. Nothing runs after this.
+        control.post(
+            issue.number,
+            f"{channel.MARKER}\n**Stopped.** {stopped}\n\n"
+            f"Nothing will run until this is cleared:\n```sh\nrm {limits.BREAKER}\n```",
+        )
+        raise
+
+
+def _attending(control: Control, conn: Any, issue: channel.Issue) -> int:
     # Read once. Rewind, pending and reconcile each used to ask GitHub for the
     # same thread, so a quiet pass cost three requests per issue and printed
     # three lines saying nothing changed.
@@ -192,6 +211,16 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
     if not waiting:
         reconcile(control, issue, session, comments)
         return 0
+    stale = [c for c in waiting if limits.too_old(c.created)]
+    for old in stale:
+        if old.id not in _dismissed:
+            log.problem(f"#{issue.number} ignoring {old.id}: older than {limits.STALE:.0f}s")
+            control.react(old.id, channel.IGNORED)
+            _dismissed.add(old.id)
+    waiting = [c for c in waiting if c not in stale]
+    if not waiting:
+        reconcile(control, issue, session, comments)
+        return 0
     log.say(f"#{issue.number} {len(waiting)} waiting")
     answered = 0
     for prompt in waiting:
@@ -200,12 +229,16 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
             control.mark_done(prompt.id)
             continue
         tag = f"#{issue.number}·{prompt.id}"
+        limits.check_not_resubmitting(prompt.id)
+        limits.note(issue.session_id, prompt.id, prompt.created)
+        limits.check_rate(issue.session_id)
         log.say(f"{tag} picked up: {_oneline(prompt.body)}")
         # The eyes first: a turn takes minutes, and without them it looks from
         # the park like the prompt fell on the floor.
         control.take_up(prompt.id)
         log.detail(f"{tag} eyes on")
         assert session is not None
+        limits.guard()
         displaced = _clear_the_way(session)
         cut_off = attending.interrupted(session["native_id"])
         log.say(f"{tag} running {session['id']} in {session['cwd']}")
@@ -220,10 +253,13 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
             blocks, summary, before = run_turn(
                 session, prompt.body, showing=_shown(control, note, started, tag), tag=tag
             )
+        cost = float(summary.get("total_cost_usd") or 0)
+        limits.note(issue.session_id, prompt.id, prompt.created, cost)
         log.say(
             f"{tag} answered in {time.monotonic() - started:.0f}s"
-            f" — {len(blocks)} blocks, ${summary.get('total_cost_usd', 0):.2f}"
+            f" — {len(blocks)} blocks, ${cost:.2f}, ${limits.spent_today():.2f} today"
         )
+        limits.check_spend()
         if displaced or cut_off:
             log.say(
                 f"{tag} {displaced or ''}{'turn before was cut off' if cut_off else ''}".strip()

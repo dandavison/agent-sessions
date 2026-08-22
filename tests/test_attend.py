@@ -6,11 +6,12 @@ will not touch a session that is open in a terminal, and it says so in the
 thread rather than failing where nobody is looking.
 """
 
+import time
 from dataclasses import dataclass, field
 
 import pytest
 
-from agent_sessions import attend, channel, comment, index
+from agent_sessions import attend, channel, comment, index, limits
 from agent_sessions.models import Block, Ran, Running, Said
 
 
@@ -28,6 +29,7 @@ class FakeChannel:
     deleted: list[int] = field(default_factory=list)
     done: list[int] = field(default_factory=list)
     fresh: bool = False
+    reacted: list[tuple[int, str]] = field(default_factory=list)
 
     def open(self, title: str, body: str) -> channel.Issue:
         self.titles.append(title)
@@ -75,6 +77,9 @@ class FakeChannel:
     def take_up(self, comment_id: int) -> None:
         self.taken.append(comment_id)
 
+    def react(self, comment_id: int, content: str) -> None:
+        self.reacted.append((comment_id, content))
+
     def mark_done(self, comment_id: int) -> None:
         self.done.append(comment_id)
 
@@ -96,8 +101,10 @@ def issue(session_id: str = "claude:7e90") -> channel.Issue:
     return channel.Issue(number=4, title="t", body=f"| session | {session_id} |", url="")
 
 
-def prompt(id: int = 11, body: str = "try it with -x") -> channel.Comment:
-    return channel.Comment(id=id, body=body, author="dandavison")
+def prompt(id: int = 11, body: str = "try it with -x", ago: float = 30.0) -> channel.Comment:
+    """A comment of mine. `ago` is how long since I wrote it, which now matters:
+    old ones are never run, and two inside a minute are not something I do."""
+    return channel.Comment(id=id, body=body, author="dandavison", created=time.time() - ago)
 
 
 @pytest.fixture
@@ -172,7 +179,7 @@ def test_the_eyes_alone_do_not_mean_a_prompt_is_done(turns: list[dict], found) -
 
 
 def test_every_prompt_waiting_is_answered(turns: list[dict], found) -> None:
-    c = FakeChannel([issue()], {4: [prompt(11, "first"), prompt(12, "second")]})
+    c = FakeChannel([issue()], {4: [prompt(11, "first", 300), prompt(12, "second", 120)]})
     attend.once(c, conn=None)
     assert [t["prompt"] for t in turns] == ["first", "second"]
 
@@ -375,7 +382,7 @@ def test_it_says_that_it_posted_and_how_much(turns: list[dict], found, capsys) -
 
 
 def test_it_says_how_many_prompts_are_waiting(turns: list[dict], found, capsys) -> None:
-    c = FakeChannel([issue()], {4: [prompt(11, "first"), prompt(12, "second")]})
+    c = FakeChannel([issue()], {4: [prompt(11, "first", 300), prompt(12, "second", 120)]})
     attend.once(c, conn=None)
     assert "2 waiting" in capsys.readouterr().err
 
@@ -765,7 +772,7 @@ def test_two_different_prompts_in_one_pass_both_run(turns: list[dict], found, mo
         "blocks",
         lambda path, since="", tip=False, whole=False: list(consumed),
     )
-    c = FakeChannel([issue()], {4: [prompt(11, "first"), prompt(12, "second")]})
+    c = FakeChannel([issue()], {4: [prompt(11, "first", 300), prompt(12, "second", 120)]})
     attend.once(c, conn=None)
     assert [b.text for b in consumed if isinstance(b, Said)] == ["first", "second"]
 
@@ -979,16 +986,37 @@ def test_a_quiet_channel_is_polled_less_and_a_busy_one_at_once(
     assert slept == [2.0, 4.0, 8.0, 8.0], f"doubling out to the ceiling, got {slept}"
 
     slept.clear()
+    monkeypatch.setattr(attend.time, "sleep", lambda s: slept.append(s) or _stop(len(slept), 1))
     c = FakeChannel([issue()], {4: [prompt()]})
     with pytest.raises(_Enough):
         attend.loop(c, conn=None, interval=1.0)
-    assert slept[0] == 1.0, "a prompt answered means poll again at once"
+    assert slept == [1.0], "a prompt answered means poll again at once"
 
 
 class _Enough(Exception):
     """The loop does not end on its own; this is how a test gets out of it."""
 
 
-def _stop(n: int) -> None:
-    if n >= 4:
+def _stop(n: int, after: int = 4) -> None:
+    if n >= after:
         raise _Enough
+
+
+def test_the_breaker_is_not_swallowed_by_the_loop_carrying_on(
+    turns: list[dict], found, monkeypatch
+) -> None:
+    """The pass survives anything so the afternoon is not lost to one blip.
+
+    That is right for a blip at GitHub and exactly wrong for a bound being
+    crossed: a breaker a broad `except` catches is not a breaker at all, and
+    this is the one thing in here that must stop everything.
+    """
+    monkeypatch.setattr(attend.limits, "check_not_resubmitting", _refuse)
+    c = FakeChannel([issue()], {4: [prompt()]})
+    with pytest.raises(limits.Tripped):
+        attend.a_pass(c, conn=None)
+    assert any("Stopped." in body for _, body in c.posted), "and it says so where I will see it"
+
+
+def _refuse(prompt_id: int) -> None:
+    raise limits.Tripped("a bound was crossed")

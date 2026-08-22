@@ -2,6 +2,10 @@
 
 from typing import Any
 
+import pytest
+
+from agent_sessions import limits
+
 SESSION = "7e90a7c6-ce43-4dfd-9d7c-8eb01ac7ccf2"
 
 
@@ -132,3 +136,16 @@ def _stamp(uuid: str) -> str:
     """Distinct, ordered timestamps keyed off the uuid, so ordering is checkable."""
     n = sum(ord(c) for c in uuid) % 60
     return f"2026-07-18T01:{n:02d}:00.000Z"
+
+
+@pytest.fixture(autouse=True)
+def _own_ledger(tmp_path, monkeypatch):
+    """No test may touch the real breaker.
+
+    The first run of the limits tests tripped the live one and wrote fifty-nine
+    records into the real ledger, which would have stopped the loop attending
+    my actual issues. A safeguard that a test run can fire is not a safeguard.
+    """
+    monkeypatch.setattr(limits, "HOME", tmp_path)
+    monkeypatch.setattr(limits, "BREAKER", tmp_path / "tripped")
+    monkeypatch.setattr(limits, "LEDGER", tmp_path / "spending.jsonl")
