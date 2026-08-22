@@ -75,8 +75,10 @@ class ClaudeSource:
     def render(self, path: Path, tools: bool, whole: bool) -> Iterator[str]:
         return render(_read(path), tools=tools, whole=whole)
 
-    def blocks(self, path: Path, since: str = "", tip: bool = False) -> list[Block]:
-        return blocks(_read(path), since=since, tip=tip)
+    def blocks(
+        self, path: Path, since: str = "", tip: bool = False, whole: bool = False
+    ) -> list[Block]:
+        return blocks(_read(path), since=since, tip=tip, whole=whole)
 
     def leaf(self, path: Path) -> str:
         return leaf(_read(path))

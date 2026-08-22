@@ -48,12 +48,19 @@ class Source(Protocol):
         """
         ...
 
-    def blocks(self, path: Path, since: str = "", tip: bool = False) -> list[Block]:
+    def blocks(
+        self, path: Path, since: str = "", tip: bool = False, whole: bool = False
+    ) -> list[Block]:
         """The conversation as blocks, which is what every reader wants.
 
         One parser per agent, and every place that shows a conversation is a
         formatter over its output. `since` gives what came after a point, which
         is how a turn just run is told from the rest of the session.
+
+        `whole` takes every record rather than the branch the leaf is on. A
+        reader wants the branch; asking what the session has ever taken in does
+        not, because a compaction starts a new root and everything said before
+        it stops being reachable.
         """
         ...
 

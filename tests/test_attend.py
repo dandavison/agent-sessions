@@ -111,7 +111,9 @@ def turns(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     monkeypatch.setattr(attend, "run_turn", fake)
     monkeypatch.setattr(index.SOURCES["claude"], "live", dict)
     # The body is read off the transcript now, and these sessions have none.
-    monkeypatch.setattr(index.SOURCES["claude"], "blocks", lambda path, since="": [])
+    monkeypatch.setattr(
+        index.SOURCES["claude"], "blocks", lambda path, since="", tip=False, whole=False: []
+    )
     return ran
 
 
@@ -442,7 +444,7 @@ def test_the_body_lists_the_turns_in_the_transcript(
     monkeypatch.setattr(
         index.SOURCES["claude"],
         "blocks",
-        lambda path, since="": [
+        lambda path, since="", tip=False, whole=False: [
             Said(role="user", text="what actually ran"),
             Said(role="assistant", text="an answer"),
         ],
@@ -573,7 +575,9 @@ def test_the_hold_names_the_agent_once_it_has_been_spawned(monkeypatch, tmp_path
 
     monkeypatch.setattr(attend.subprocess, "Popen", lambda *a, **k: Fake())
     monkeypatch.setattr(index.SOURCES["claude"], "leaf", lambda path: "")
-    monkeypatch.setattr(index.SOURCES["claude"], "blocks", lambda path, since="": [])
+    monkeypatch.setattr(
+        index.SOURCES["claude"], "blocks", lambda path, since="", tip=False, whole=False: []
+    )
     attend.run_turn(SESSION, "hello")
     assert named == [("7e90", 4242)]
 
@@ -603,7 +607,11 @@ def test_a_pass_does_not_swallow_a_credential_failure(monkeypatch, capsys) -> No
 
 
 def transcript(monkeypatch, *blocks) -> None:
-    monkeypatch.setattr(index.SOURCES["claude"], "blocks", lambda path, since="": list(blocks))
+    monkeypatch.setattr(
+        index.SOURCES["claude"],
+        "blocks",
+        lambda path, since="", tip=False, whole=False: list(blocks),
+    )
 
 
 def said_by_me(text: str, uuid: str) -> Said:
@@ -731,7 +739,11 @@ def test_the_same_prompt_sent_twice_runs_once(turns: list[dict], found, monkeypa
         return [Said(role="assistant", text="Done.")], {}, "before"
 
     monkeypatch.setattr(attend, "run_turn", fake)
-    monkeypatch.setattr(index.SOURCES["claude"], "blocks", lambda path, since="": list(consumed))
+    monkeypatch.setattr(
+        index.SOURCES["claude"],
+        "blocks",
+        lambda path, since="", tip=False, whole=False: list(consumed),
+    )
     same = "Can we view this as a matrix"
     c = FakeChannel([issue()], {4: [prompt(11, same), prompt(12, same)]})
     attend.once(c, conn=None)
@@ -747,7 +759,11 @@ def test_two_different_prompts_in_one_pass_both_run(turns: list[dict], found, mo
         return [Said(role="assistant", text="Done.")], {}, "before"
 
     monkeypatch.setattr(attend, "run_turn", fake)
-    monkeypatch.setattr(index.SOURCES["claude"], "blocks", lambda path, since="": list(consumed))
+    monkeypatch.setattr(
+        index.SOURCES["claude"],
+        "blocks",
+        lambda path, since="", tip=False, whole=False: list(consumed),
+    )
     c = FakeChannel([issue()], {4: [prompt(11, "first"), prompt(12, "second")]})
     attend.once(c, conn=None)
     assert [b.text for b in consumed if isinstance(b, Said)] == ["first", "second"]
@@ -777,7 +793,9 @@ def test_an_issue_that_names_no_start_shows_only_the_recent_past(
     many = []
     for i in range(attend.MOST + 10):
         many += [Said(role="user", text=f"q{i}", uuid=f"u{i}"), Said("assistant", f"a{i}")]
-    monkeypatch.setattr(index.SOURCES["claude"], "blocks", lambda path, since="", tip=False: many)
+    monkeypatch.setattr(
+        index.SOURCES["claude"], "blocks", lambda path, since="", tip=False, whole=False: many
+    )
     c = FakeChannel([issue()], {4: []})
     attend.reconcile(c, issue(), SESSION)
     assert len(c.posted) == attend.MOST
@@ -792,10 +810,10 @@ def test_a_prompt_consumed_before_the_window_is_not_run_again(
     is a fact about the whole session. Conflated, moving a window forward
     re-armed every prompt behind it.
     """
-    whole = [Said(role="user", text="asked long ago", uuid="u1"), Said("assistant", "answered")]
+    every = [Said(role="user", text="asked long ago", uuid="u1"), Said("assistant", "answered")]
 
-    def blocks(path, since="", tip=False):
-        return [] if since else whole
+    def blocks(path, since="", tip=False, whole=False):
+        return [] if since else every
 
     monkeypatch.setattr(index.SOURCES["claude"], "blocks", blocks)
     windowed = channel.Issue(
@@ -869,7 +887,9 @@ def test_a_turn_leaves_one_comment_not_two(turns: list[dict], found, monkeypatch
         return list(consumed), {}, "before"
 
     monkeypatch.setattr(attend, "run_turn", fake)
-    monkeypatch.setattr(index.SOURCES["claude"], "blocks", lambda p, since="", tip=False: consumed)
+    monkeypatch.setattr(
+        index.SOURCES["claude"], "blocks", lambda p, since="", tip=False, whole=False: consumed
+    )
     c = FakeChannel([issue()], {4: [prompt(11, "two and two?")]})
     attend.once(c, conn=None)
     left = [x for x in c.comments_[4] if x.is_ours]
@@ -889,7 +909,7 @@ def test_reconciling_keeps_what_only_the_thread_knew(turns: list[dict], found, m
     monkeypatch.setattr(
         index.SOURCES["claude"],
         "blocks",
-        lambda p, since="", tip=False: [
+        lambda p, since="", tip=False, whole=False: [
             Said(role="user", text="two and two?", uuid="u7"),
             Said("assistant", "four and a bit"),
         ],
@@ -930,7 +950,9 @@ def test_the_answer_arrives_as_a_new_comment(turns: list[dict], found, monkeypat
         return list(consumed), {}, "before"
 
     monkeypatch.setattr(attend, "run_turn", fake)
-    monkeypatch.setattr(index.SOURCES["claude"], "blocks", lambda p, since="", tip=False: consumed)
+    monkeypatch.setattr(
+        index.SOURCES["claude"], "blocks", lambda p, since="", tip=False, whole=False: consumed
+    )
     c = FakeChannel([issue()], {4: [prompt(11, "q")]})
     attend.once(c, conn=None)
     assert any("four" in body for _, body in c.posted), "the answer was posted"

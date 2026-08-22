@@ -387,7 +387,10 @@ def _seen(session: dict[str, Any] | None) -> list[Block]:
     """
     if session is None:
         return []
-    return index.SOURCES[session["agent"]].blocks(Path(session["path"]))
+    # Every record, not the branch the leaf is on. A compaction writes a
+    # boundary with no parent, so walking back from the leaf stops there and
+    # every prompt answered before it re-arms — nine of them, in the park.
+    return index.SOURCES[session["agent"]].blocks(Path(session["path"]), whole=True)
 
 
 def _clear_the_way(session: dict[str, Any]) -> str:
