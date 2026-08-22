@@ -695,3 +695,39 @@ def test_a_prompt_is_marked_done_when_its_answer_lands(turns: list[dict], found)
     attend.once(c, conn=None)
     assert c.taken == [11]
     assert c.done == [11]
+
+
+def test_the_same_prompt_sent_twice_runs_once(turns: list[dict], found, monkeypatch) -> None:
+    """A double send from a phone, and both of them ran.
+
+    Pending was worked out once, before any turn, so the second copy was still
+    on the list after the first had put that very text into the session. The
+    rule was right; it was being asked at the wrong moment.
+    """
+    consumed: list[Block] = []
+
+    def fake(session, text, showing=None):
+        consumed.append(Said(role="user", text=text, uuid=f"u{len(consumed)}"))
+        return [Said(role="assistant", text="Done.")], {}, "before"
+
+    monkeypatch.setattr(attend, "run_turn", fake)
+    monkeypatch.setattr(index.SOURCES["claude"], "blocks", lambda path, since="": list(consumed))
+    same = "Can we view this as a matrix"
+    c = FakeChannel([issue()], {4: [prompt(11, same), prompt(12, same)]})
+    attend.once(c, conn=None)
+    assert [b.text for b in consumed] == [same]
+
+
+def test_two_different_prompts_in_one_pass_both_run(turns: list[dict], found, monkeypatch) -> None:
+    """Re-checking must not turn a queue of real prompts into a queue of one."""
+    consumed: list[Block] = []
+
+    def fake(session, text, showing=None):
+        consumed.append(Said(role="user", text=text, uuid=f"u{len(consumed)}"))
+        return [Said(role="assistant", text="Done.")], {}, "before"
+
+    monkeypatch.setattr(attend, "run_turn", fake)
+    monkeypatch.setattr(index.SOURCES["claude"], "blocks", lambda path, since="": list(consumed))
+    c = FakeChannel([issue()], {4: [prompt(11, "first"), prompt(12, "second")]})
+    attend.once(c, conn=None)
+    assert [b.text for b in consumed] == ["first", "second"]

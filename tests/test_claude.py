@@ -705,3 +705,36 @@ def test_a_block_knows_where_it_came_from(tmp_path: Path) -> None:
     ]
     said = [b for b in blocks(records) if isinstance(b, Said)]
     assert [b.uuid for b in said] == ["u1", "a1"]
+
+
+def test_a_turn_in_flight_is_invisible_from_the_recorded_leaf(tmp_path: Path) -> None:
+    """Progress said `0 so far` for the whole turn, then everything at once.
+
+    The live thread is walked back from the leaf the sidecar names, and that is
+    not written until the turn ends. Everything the turn appends hangs below it
+    and is not on the branch, so watching a turn this way sees nothing.
+    """
+    records = [
+        user("u1", None, "the first thing"),
+        assistant("a1", "u1", [text_block("the first answer")], "req_1"),
+        last_prompt("a1"),
+        user("u2", "a1", "asked while running"),
+        assistant("a2", "u2", [text_block("answered while running")], "req_2"),
+    ]
+    settled = [b.text for b in blocks(records) if isinstance(b, Said)]
+    assert "asked while running" not in settled
+
+    growing = [b.text for b in blocks(records, tip=True) if isinstance(b, Said)]
+    assert "asked while running" in growing
+    assert "answered while running" in growing
+
+
+def test_the_recorded_leaf_still_decides_once_nothing_is_running(tmp_path: Path) -> None:
+    """It is what keeps a rewound session from reading as its abandoned branch."""
+    records = [
+        user("u1", None, "kept"),
+        assistant("a1", "u1", [text_block("kept answer")], "req_1"),
+        user("u2", "u1", "abandoned"),
+        last_prompt("a1"),
+    ]
+    assert "abandoned" not in [b.text for b in blocks(records) if isinstance(b, Said)]
