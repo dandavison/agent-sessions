@@ -18,8 +18,8 @@ from conftest import (
     user,
 )
 
-from agent_sessions.models import Delta, Running
-from agent_sessions.sources.claude import ClaudeSource, parse
+from agent_sessions.models import Delta, Running, Said
+from agent_sessions.sources.claude import ClaudeSource, blocks, parse
 from agent_sessions.sources.claude import _read as read
 from agent_sessions.sources.claude import live as claude_live
 from agent_sessions.sources.claude import render as claude_render
@@ -690,3 +690,18 @@ def test_a_transcript_being_written_to_can_still_be_read(tmp_path: Path) -> None
     whole = orjson.dumps(user("u1", None, "hello"))
     path.write_bytes(whole + b"\n" + whole[:20])
     assert [r["uuid"] for r in read(path)] == ["u1"]
+
+
+def test_a_block_knows_where_it_came_from(tmp_path: Path) -> None:
+    """A rendered turn has to be matched back to the turn it renders.
+
+    Without an identity from the transcript, reconciling the thread means
+    guessing by position or by text, and both drift.
+    """
+    records = [
+        user("u1", None, "why is conform relocating"),
+        assistant("a1", "u1", [text_block("Because of submodules.")], "req_1"),
+        last_prompt("a1"),
+    ]
+    said = [b for b in blocks(records) if isinstance(b, Said)]
+    assert [b.uuid for b in said] == ["u1", "a1"]

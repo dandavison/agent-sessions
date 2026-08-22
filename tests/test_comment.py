@@ -169,3 +169,45 @@ def test_the_point_is_not_visible_in_the_rendered_comment() -> None:
     """An HTML comment: on the page it is nothing, in the body it is durable."""
     out = comment.render([said("Done.")], DONE, at_uuid="9f3c1d20")
     assert "9f3c1d20" not in out.replace(comment.at("9f3c1d20"), "")
+
+
+# --- the thread as a projection of the session -------------------------------
+
+
+def asked(s: str, uuid: str) -> Said:
+    return Said(role="user", text=s, uuid=uuid)
+
+
+def test_a_turn_is_what_i_asked_and_what_followed() -> None:
+    """The unit the thread shows, and the unit it has to be able to match back."""
+    (turn,) = comment.turns([asked("why?", "u1"), said("because"), ran("Read", file_path="/a.py")])
+    assert turn.key == "u1"
+    assert turn.asked == "why?"
+    assert len(turn.blocks) == 2
+
+
+def test_each_thing_i_asked_starts_a_new_turn() -> None:
+    found = comment.turns([asked("first", "u1"), said("one"), asked("second", "u2"), said("two")])
+    assert [t.key for t in found] == ["u1", "u2"]
+    assert [t.asked for t in found] == ["first", "second"]
+
+
+def test_work_before_anything_i_asked_is_not_a_turn() -> None:
+    """A window can open mid-session, and the tail of an earlier turn is not mine."""
+    assert comment.turns([said("trailing"), asked("mine", "u9")])[0].key == "u9"
+    assert len(comment.turns([said("trailing"), asked("mine", "u9")])) == 1
+
+
+def test_a_rendered_turn_says_which_turn_it_is() -> None:
+    (turn,) = comment.turns([asked("why?", "u1"), said("because")])
+    body = comment.render_turn(turn)
+    assert comment.turn_key(body) == "u1"
+    assert "because" in body
+
+
+def test_a_rendered_turn_says_which_comment_asked_for_it() -> None:
+    """The thread owns its own ids, so consumption is recorded where it is known."""
+    (turn,) = comment.turns([asked("why?", "u1"), said("because")])
+    body = comment.render_turn(turn, asked_by=4242)
+    assert comment.asked_by(body) == 4242
+    assert comment.asked_by(comment.render_turn(turn)) == 0

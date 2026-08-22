@@ -409,7 +409,7 @@ def blocks(records: list[dict[str, Any]], whole: bool = False, since: str = "") 
                 )
             )
         elif text := _text(node):
-            out.append(Said(role=_role(node), text=text))
+            out.append(Said(role=_role(node), text=text, uuid=str(node["uuid"])))
         else:
             out.extend(_calls(node, results))
     return out

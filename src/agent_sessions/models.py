@@ -92,10 +92,15 @@ class Compaction:
 
 @dataclass(frozen=True, slots=True)
 class Said:
-    """Prose, by one side or the other."""
+    """Prose, by one side or the other.
+
+    `uuid` is the record it came from, which is how a rendering of a turn is
+    matched back to the turn: position drifts and text is not unique.
+    """
 
     role: str
     text: str
+    uuid: str = ""
 
 
 @dataclass(frozen=True, slots=True)
