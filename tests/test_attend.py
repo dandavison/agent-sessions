@@ -532,3 +532,35 @@ def test_a_stale_progress_comment_is_not_one_of_those_replies(turns: list[dict],
     running = channel.Comment(id=99, body=f"{channel.RUNNING}\nworking…", author="a[bot]")
     piled = [prompt(11, "first"), running]
     assert [c.body for c in attend.unanswered(piled)] == ["first"]
+
+
+# --- what survives a crash ----------------------------------------------------
+
+
+def test_the_hold_names_the_agent_once_it_has_been_spawned(monkeypatch, tmp_path) -> None:
+    """The server's pid is not what has the transcript open; the agent's is."""
+    named: list[tuple[str, int]] = []
+    monkeypatch.setattr(attend.attending, "writer", lambda n, p: named.append((n, p)))
+    monkeypatch.setattr(attend, "watch", lambda *a, **k: None)
+
+    class Fake:
+        pid = 4242
+
+        def communicate(self, text, timeout=None):
+            return "{}", ""
+
+    monkeypatch.setattr(attend.subprocess, "Popen", lambda *a, **k: Fake())
+    monkeypatch.setattr(index.SOURCES["claude"], "leaf", lambda path: "")
+    monkeypatch.setattr(index.SOURCES["claude"], "blocks", lambda path, since="": [])
+    attend.run_turn(SESSION, "hello")
+    assert named == [("7e90", 4242)]
+
+
+def test_an_interrupted_turn_is_said_to_be_interrupted(
+    turns: list[dict], found, monkeypatch
+) -> None:
+    """A half-answer passed off as an answer is the worst thing this can do."""
+    monkeypatch.setattr(attend.attending, "interrupted", lambda native: True)
+    c = FakeChannel([issue()], {4: [prompt()]})
+    attend.once(c, conn=None)
+    assert "cut off" in c.edited[-1][1].lower()
