@@ -443,3 +443,37 @@ def test_the_reactions_are_feedback_and_not_state() -> None:
     seconds and from a phone, that the thing is working.
     """
     assert not hasattr(channel.Comment(id=1, body="x", author="me"), "taken_up")
+
+
+# --- a thread longer than one page --------------------------------------------
+
+
+def test_every_comment_is_fetched_not_just_the_first_hundred() -> None:
+    """Reconciling against one page of a longer thread reposts almost everything.
+
+    `have` came from the oldest hundred comments, so nearly every turn looked
+    missing and was posted again — every pass, for ever. Six hundred and fifty
+    comments on a session with seventy-three turns.
+    """
+    page1 = [{"id": i, "body": f"c{i}", "user": {"login": "dandavison"}} for i in range(100)]
+    page2 = [{"id": i, "body": f"c{i}", "user": {"login": "dandavison"}} for i in range(100, 150)]
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        page = request.url.params.get("page", "1")
+        return httpx.Response(200, json=page1 if page == "1" else page2)
+
+    c = channel.Channel(
+        repo="dandavison/agent-work",
+        client=httpx.Client(
+            transport=httpx.MockTransport(handle), base_url="https://api.github.com"
+        ),
+    )
+    assert len(c.comments(4)) == 150
+
+
+def test_a_short_thread_costs_one_request() -> None:
+    """Paging must not turn every poll into two calls."""
+    seen: list[httpx.Request] = []
+    c = channel_over({"GET /repos/dandavison/agent-work/issues/4/comments": [MINE]}, seen)
+    c.comments(4)
+    assert len(seen) == 1
