@@ -4,6 +4,7 @@ import sqlite3
 import sys
 import time
 import webbrowser
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import asdict
 from pathlib import Path
@@ -16,6 +17,7 @@ import segno
 from agent_sessions import (
     agents,
     attend,
+    attending,
     channel,
     db,
     display,
@@ -472,7 +474,7 @@ def attend_channel(interval: float, single: bool, verbose: bool) -> None:
         attend.once(control, conn)
         return
     with suppress(KeyboardInterrupt):
-        attend.loop(control, conn, interval)
+        _attending(lambda: attend.loop(control, conn, interval))
 
 
 @main.command()
@@ -538,7 +540,15 @@ def _attend_beside(server: Any) -> None:
     log.say(f"attending {control.repo}, every {attend.INTERVAL:g}s")
     Thread(target=server.serve_forever, daemon=True).start()
     with suppress(KeyboardInterrupt), server:
-        attend.loop(control, db.connect())
+        _attending(lambda: attend.loop(control, db.connect()))
+
+
+def _attending(run: Callable[[], None]) -> None:
+    """Only one loop may attend, and a second should say so rather than fight."""
+    try:
+        run()
+    except attending.AlreadyAttending as e:
+        raise click.UsageError(str(e)) from e
 
 
 def _announce(urls: list[str]) -> None:

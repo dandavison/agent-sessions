@@ -18,6 +18,7 @@ A session open in a pane at home is taken over rather than refused. I am not at
 that keyboard, and a refusal is not a tool working.
 """
 
+import atexit
 import os
 import signal
 import subprocess
@@ -36,6 +37,10 @@ from agent_sessions.models import Block, Ran, Said
 # A poll that finds nothing returns 304 and costs no rate limit, so this is
 # bounded by politeness rather than budget: one pass is a request for the issue
 # list plus one per open issue.
+# Every agent this loop has spawned, so that stopping the loop stops them too.
+# An orphan keeps writing to a transcript nobody thinks is being written to.
+_children: set[subprocess.Popen[str]] = set()
+
 INTERVAL = 2.0
 
 # How often the transcript is looked at while a turn runs, and how long it may
@@ -82,9 +87,23 @@ def issue_for(control: Control, session: dict[str, Any]) -> channel.Issue:
 
 
 def loop(control: Control, conn: Any, interval: float = INTERVAL) -> None:
-    while True:
-        a_pass(control, conn)
-        time.sleep(interval)
+    """Attend the channel until interrupted, and take nothing with us on the way out."""
+    with attending.only_one():
+        atexit.register(stop_children)
+        try:
+            while True:
+                a_pass(control, conn)
+                time.sleep(interval)
+        finally:
+            stop_children()
+
+
+def stop_children() -> None:
+    """Stop any agent this loop spawned. An orphan writes where nobody is looking."""
+    for child in list(_children):
+        with suppress(ProcessLookupError):
+            child.terminate()
+        _children.discard(child)
 
 
 def a_pass(control: Control, conn: Any) -> int:
@@ -136,6 +155,7 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
             )
             continue
         displaced = _clear_the_way(session)
+        cut_off = attending.interrupted(session["native_id"])
         log.say(f"#{issue.number} running {session['id']} in {session['cwd']}")
         started = time.monotonic()
         # Before the turn, not after: the thread should show something within
@@ -152,7 +172,13 @@ def _attend(control: Control, conn: Any, issue: channel.Issue) -> int:
             f"#{issue.number} answered in {time.monotonic() - started:.0f}s"
             f" — {len(blocks)} blocks, ${summary.get('total_cost_usd', 0):.2f}"
         )
-        body = channel.MARKER + "\n" + displaced + comment.render(blocks, summary, at_uuid=before)
+        body = (
+            channel.MARKER
+            + "\n"
+            + displaced
+            + _cut_off_note(cut_off)
+            + comment.render(blocks, summary, at_uuid=before)
+        )
         control.edit(note, body)
         log.say(f"#{issue.number} posted {len(body):,} chars")
         answered += 1
@@ -232,6 +258,16 @@ def unanswered(comments: list[channel.Comment]) -> list[channel.Comment]:
     mine = [c for c in comments if not c.is_ours]
     replied = sum(1 for c in comments if c.is_ours and not c.is_progress)
     return mine[replied:]
+
+
+def _cut_off_note(cut_off: bool) -> str:
+    """A half-answer passed off as an answer is the worst thing this can do."""
+    if not cut_off:
+        return ""
+    return (
+        "<sub>The turn before this one was cut off part way; what it had done is in"
+        " the session. Say so if you want it carried on.</sub>\n\n"
+    )
 
 
 def _clear_the_way(session: dict[str, Any]) -> str:
@@ -314,6 +350,7 @@ def run_turn(
     done = _spawn(
         source.turn_command(session["native_id"]),
         cwd=session["cwd"],
+        native_id=session["native_id"],
         prompt=prompt,
         watching=lambda: source.blocks(path, since=before),
         showing=showing,
@@ -325,6 +362,7 @@ def run_turn(
 def _spawn(
     argv: list[str],
     cwd: str,
+    native_id: str,
     prompt: str,
     watching: Callable[[], list[Block]],
     showing: Callable[[list[Block]], None] | None = None,
@@ -344,6 +382,8 @@ def _spawn(
         stderr=subprocess.PIPE,
         text=True,
     )
+    attending.writer(native_id, proc.pid)
+    _children.add(proc)
     spoken: dict[str, str] = {}
 
     def talk() -> None:
@@ -353,6 +393,7 @@ def _spawn(
     worker.start()
     watch(watching, alive=worker.is_alive, showing=showing)
     worker.join(TIMEOUT)
+    _children.discard(proc)
     if worker.is_alive():
         proc.kill()
         worker.join(5)

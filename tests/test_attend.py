@@ -545,9 +545,13 @@ def test_the_hold_names_the_agent_once_it_has_been_spawned(monkeypatch, tmp_path
 
     class Fake:
         pid = 4242
+        returncode = 0
 
         def communicate(self, text, timeout=None):
             return "{}", ""
+
+        def terminate(self) -> None:
+            pass
 
     monkeypatch.setattr(attend.subprocess, "Popen", lambda *a, **k: Fake())
     monkeypatch.setattr(index.SOURCES["claude"], "leaf", lambda path: "")

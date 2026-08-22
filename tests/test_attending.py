@@ -139,10 +139,8 @@ def test_a_second_loop_refuses_rather_than_fighting_the_first(locks: Path) -> No
     Worse, each one's takeover kills the other's turn, because a headless turn
     registers as live. At-most-once cannot hold while two of these exist.
     """
-    with attending.only_one():
-        with pytest.raises(attending.AlreadyAttending):
-            with attending.only_one():
-                pass
+    with attending.only_one(), pytest.raises(attending.AlreadyAttending), attending.only_one():
+        pass
 
 
 def test_the_loop_may_start_again_once_the_first_has_gone(locks: Path) -> None:
