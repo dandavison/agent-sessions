@@ -24,6 +24,7 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
+import httpx
 import orjson
 import pytest
 
@@ -55,13 +56,30 @@ def scratch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     return session
 
 
+def _as_me() -> channel.Channel:
+    """A channel authenticated as me rather than as the app.
+
+    A prompt is a comment of mine. Posted through the app's channel it is
+    authored by the bot, and the loop rightly ignores its own writing — so a
+    test that posts that way is testing nothing, which is what the first three
+    runs of this were doing.
+    """
+    return channel.Channel(
+        client=httpx.Client(
+            base_url=channel.API,
+            headers={"Authorization": f"Bearer {channel._gh_token()}"},
+            timeout=30.0,
+        )
+    )
+
+
 @pytest.fixture
 def live(scratch: dict):
     """A scratch issue in the real repo, closed again however the test ends."""
     control = channel.Channel()
     issue = attend.issue_for(control, scratch)
     try:
-        yield control, issue
+        yield control, issue, _as_me()
     finally:
         control._send("PATCH", f"/repos/{control.repo}/issues/{issue.number}", {"state": "closed"})
 
@@ -73,10 +91,10 @@ def test_a_prompt_is_answered_once_and_the_thread_settles(scratch, live, monkeyp
     a longer thread reposted nearly every turn, for ever, and no unit test saw
     it because no double paginates.
     """
-    control, issue = live
+    control, issue, me = live
     monkeypatch.setattr(attend, "run_turn", _answers(scratch))
 
-    mine = control.post(issue.number, "what is two and two?")
+    mine = me.post(issue.number, "what is two and two?")
     attend.once(control, conn=None, only=issue.number)
 
     after_one = control.comments(issue.number)
@@ -92,7 +110,7 @@ def test_a_prompt_is_answered_once_and_the_thread_settles(scratch, live, monkeyp
 
 def test_a_turn_had_at_the_keyboard_shows_up_without_being_posted(scratch, live) -> None:
     """The guarantee the thread could not make before it was a projection."""
-    control, issue = live
+    control, issue, me = live
     _append(Path(scratch["path"]), _user("u9", "a0", "asked at the keyboard"))
     _append(Path(scratch["path"]), _assistant("a9", "u9", "answered at the keyboard"))
 
@@ -104,9 +122,9 @@ def test_a_turn_had_at_the_keyboard_shows_up_without_being_posted(scratch, live)
 
 def test_the_eyes_become_a_rocket(scratch, live, monkeypatch) -> None:
     """Eyes on means working, and that is only true if something takes them off."""
-    control, issue = live
+    control, issue, me = live
     monkeypatch.setattr(attend, "run_turn", _answers(scratch))
-    mine = control.post(issue.number, "what is two and two?")
+    mine = me.post(issue.number, "what is two and two?")
     attend.once(control, conn=None, only=issue.number)
 
     reactions = control._get(f"/repos/{control.repo}/issues/comments/{mine}/reactions")
@@ -117,7 +135,7 @@ def test_the_eyes_become_a_rocket(scratch, live, monkeypatch) -> None:
 
 def test_an_issue_starts_from_where_the_session_already_was(scratch, live) -> None:
     """Opening one is a way in, not a re-staging of everything said before."""
-    _control, issue = live
+    _control, issue, _me = live
     assert comment.frontmatter(issue.body)["from"]
     assert not [c for c in _fresh(_control).comments(issue.number) if comment.turn_key(c.body)]
 
@@ -145,7 +163,8 @@ def _fresh(control: channel.Channel) -> channel.Channel:
 
 
 def _reread(control: channel.Channel, issue: channel.Issue) -> channel.Issue:
-    return next(i for i in _fresh(control).issues() if i.number == issue.number)
+    """By name: the list does not have a new issue in it yet."""
+    return _fresh(control).issue(issue.number)
 
 
 def _append(path: Path, record: dict) -> None:

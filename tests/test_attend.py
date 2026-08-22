@@ -838,3 +838,48 @@ def test_naming_an_issue_asks_for_it_rather_than_searching(turns: list[dict], fo
     attend.once(c, conn=None, only=4)
     assert asked == [4]
     assert [t["prompt"] for t in turns] == ["for four"]
+
+
+def test_a_turn_leaves_one_comment_not_two(turns: list[dict], found, monkeypatch) -> None:
+    """The answer and the rendering of the same turn were separate comments.
+
+    The answer went into the progress comment carrying no turn key, so
+    reconciling did not recognise it and posted a rendering of its own. The
+    answer has to be the rendering.
+    """
+    consumed: list[Block] = []
+
+    def fake(session, text, showing=None, tag=""):
+        consumed.extend([Said(role="user", text=text, uuid="u7"), Said("assistant", "four")])
+        return list(consumed), {}, "before"
+
+    monkeypatch.setattr(attend, "run_turn", fake)
+    monkeypatch.setattr(index.SOURCES["claude"], "blocks", lambda p, since="", tip=False: consumed)
+    c = FakeChannel([issue()], {4: [prompt(11, "two and two?")]})
+    attend.once(c, conn=None)
+    assert len(c.posted) == 1, "the progress comment, and nothing else"
+    assert comment.turn_key(c.edited[-1][1]) == "u7"
+    assert comment.asked_by(c.edited[-1][1]) == 11
+
+
+def test_reconciling_keeps_what_only_the_thread_knew(turns: list[dict], found, monkeypatch) -> None:
+    """Which comment asked, and where to rewind to, are not in the transcript."""
+    turn = comment.Turn("u7", "two and two?", [Said("assistant", "four")])
+    already = channel.Comment(
+        id=50,
+        body=comment.render_turn(turn, marks={comment.BY: "11", comment.AT: "leaf"}),
+        author="a[bot]",
+    )
+    monkeypatch.setattr(
+        index.SOURCES["claude"],
+        "blocks",
+        lambda p, since="", tip=False: [
+            Said(role="user", text="two and two?", uuid="u7"),
+            Said("assistant", "four and a bit"),
+        ],
+    )
+    c = FakeChannel([issue()], {4: [already]})
+    attend.reconcile(c, issue(), SESSION)
+    assert comment.asked_by(c.edited[-1][1]) == 11
+    assert comment.point(c.edited[-1][1]) == "leaf"
+    assert "four and a bit" in c.edited[-1][1]
