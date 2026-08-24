@@ -224,14 +224,38 @@ def _branch_points(nodes: list[dict[str, Any]]) -> set[str]:
     return {uuid for uuid, kids in children.items() if len(kids) > 1}
 
 
-def _active_branch(nodes: list[dict[str, Any]], leaf_uuid: str | None) -> list[dict[str, Any]]:
+def _active_branch(
+    nodes: list[dict[str, Any]], leaf_uuid: str | None, tip: bool = False
+) -> list[dict[str, Any]]:
     """The live thread: walk parents back from the leaf, then read it forwards.
 
     Without a `last-prompt` record — 1 file in 3 has none — the leaf is simply
     the last record written.
+
+    `tip` asks for where that branch has got to rather than where the leaf says
+    it had. The leaf lags: about 1 file in 5 has grown past it, and a reader of
+    those is otherwise shown a session missing its last answer. What the leaf
+    is needed for is which branch is live, and that it still answers, so the
+    end of the file is not a substitute for it.
     """
     by_uuid = {n["uuid"]: n for n in nodes}
-    return _thread_to(by_uuid, by_uuid.get(leaf_uuid or "") or nodes[-1])
+    leaf = by_uuid.get(leaf_uuid or "")
+    if leaf is None:
+        return _thread_to(by_uuid, nodes[-1])
+    return _thread_to(by_uuid, _end_of_branch(nodes, leaf) if tip else leaf)
+
+
+def _end_of_branch(nodes: list[dict[str, Any]], node: dict[str, Any]) -> dict[str, Any]:
+    """Follow children down from a node, taking the most recently written at a fork."""
+    children: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for n in nodes:
+        if parent := n.get("parentUuid"):
+            children[parent].append(n)
+    seen = set()
+    while (below := children.get(node["uuid"])) and node["uuid"] not in seen:
+        seen.add(node["uuid"])
+        node = below[-1]
+    return node
 
 
 def _thread_to(
@@ -410,8 +434,7 @@ def blocks(
     """
     nodes = [r for r in records if r.get("type") in NODE_TYPES and r.get("uuid")]
     if not whole:
-        leaf_uuid = None if tip else _sidecar_state(records).get("leafUuid")
-        nodes = _active_branch(nodes, leaf_uuid)
+        nodes = _active_branch(nodes, _sidecar_state(records).get("leafUuid"), tip=tip)
     if since:
         nodes = _after(nodes, since)
     boundaries = {c.uuid for c in _compactions("", records)}

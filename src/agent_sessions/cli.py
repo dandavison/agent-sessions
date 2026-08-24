@@ -324,6 +324,10 @@ def cat(id: str, tools: bool, whole: bool, last: bool) -> None:
     A turn is what I asked and everything that followed. `--last` gives the one
     just had; `@<point>` gives the one that point falls in, taking the points
     `show --turns` and `tree` print.
+
+    Read to where the transcript has got to, not to the leaf recorded in it:
+    that leaf lags, and a session is usually asked for on account of the answer
+    it ends with.
     """
     conn = db.connect()
     session, at = _resolve_point(conn, id)
@@ -333,10 +337,10 @@ def cat(id: str, tools: bool, whole: bool, last: bool) -> None:
     path = Path(session["path"])
     if not path.exists():
         raise click.UsageError(f"{path} is gone. Run `agent-sessions sync`.")
-    if not (at or last):
-        _write(source.render(path, tools=tools, whole=whole))
-        return
-    _write(source.render_blocks(_one_turn(source.blocks(path, whole=whole), at, last), tools=tools))
+    conversation = source.blocks(path, tip=True, whole=whole)
+    if at or last:
+        conversation = _one_turn(conversation, at, last)
+    _write(source.render_blocks(conversation, tools=tools))
 
 
 def _one_turn(conversation: list[Block], at: str, last: bool) -> list[Block]:
