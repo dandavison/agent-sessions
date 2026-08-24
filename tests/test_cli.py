@@ -2,11 +2,14 @@
 
 from pathlib import Path
 
+import orjson
 import pytest
+from conftest import SESSION, assistant, text_block, tool_result, tool_use, user
 
 from agent_sessions import cli, db, query
 from agent_sessions.models import Node, Session
 from agent_sessions.resume import Resumed
+from agent_sessions.sources import claude
 
 ID = "claude:7e90a7c6-ce43-4dfd-9d7c-8eb01ac7ccf2"
 
@@ -229,3 +232,58 @@ def test_status_counts_sessions_not_the_tool(indexed: Path, run) -> None:
     _, out, _ = run("status")
     assert "sessions " in out
     assert "agent-sessions " not in out
+
+
+# --- one turn, rather than the whole session -------------------------------
+
+
+@pytest.fixture
+def transcribed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """A session whose transcript is really on disk, which is what `cat` reads."""
+    records = [
+        user("u1", None, "first question"),
+        assistant("a1", "u1", [text_block("first answer")], "req_1"),
+        user("u2", "a1", "second question"),
+        assistant("a2", "u2", [tool_use("Bash")], "req_2"),
+        tool_result("r2", "a2"),
+        assistant("a3", "r2", [text_block("second answer")], "req_2"),
+    ]
+    project = tmp_path / "-Users-dan-src-wormhole"
+    project.mkdir()
+    path = project / f"{SESSION}.jsonl"
+    path.write_bytes(b"".join(orjson.dumps(r) + b"\n" for r in records))
+    delta = claude.parse(path, records)
+    assert delta is not None
+
+    index_path = tmp_path / "index.db"
+    conn = db.connect(index_path)
+    db.write_session(conn, delta.session)
+    db.write_nodes(conn, delta.nodes)
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(db, "DB_PATH", index_path)
+    return delta.session.id
+
+
+def test_cat_last_is_the_final_turn_alone(transcribed: str, run) -> None:
+    _, out, _ = run("cat", transcribed, "--last")
+    assert "second question" in out
+    assert "second answer" in out
+    assert "first question" not in out
+
+
+def test_cat_at_a_point_is_the_turn_that_point_falls_in(transcribed: str, run) -> None:
+    _, out, _ = run("cat", f"{transcribed}@u1")
+    assert "first answer" in out
+    assert "second answer" not in out
+
+
+def test_cat_of_one_turn_still_holds_what_was_run(transcribed: str, run) -> None:
+    _, out, _ = run("cat", transcribed, "--last", "--tools")
+    assert "Bash" in out
+
+
+def test_cat_cannot_be_asked_for_two_different_turns(transcribed: str, run) -> None:
+    code, _, err = run("cat", f"{transcribed}@u1", "--last")
+    assert code == cli.EXIT_USAGE
+    assert "--last" in err
