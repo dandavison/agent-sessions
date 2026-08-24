@@ -16,13 +16,12 @@ machine and holds what a commit never would.
 """
 
 import re
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import orjson
 
-from agent_sessions.models import Block, Boundary, Ran, Said
+from agent_sessions.models import Block, Boundary, Ran, Said, Turn
 
 # Invisible once GitHub renders it, and what says a comment is not a prompt for
 # everything the loop posted before it had a bot of its own.
@@ -95,31 +94,6 @@ LANGUAGES = {
 
 # The file a tool is about, whichever of these it calls it.
 PATH_KEYS = ("file_path", "path", "notebook_path")
-
-
-@dataclass(frozen=True, slots=True)
-class Turn:
-    """What I asked, and everything that followed until I asked again."""
-
-    key: str
-    asked: str
-    blocks: list[Block]
-
-
-def turns(blocks: list[Block]) -> list[Turn]:
-    """The conversation as turns, which is the unit the thread shows.
-
-    Work before the first thing I said is not a turn: a window can open in the
-    middle of a session, and the tail of an earlier exchange is not mine to
-    render as an answer.
-    """
-    found: list[Turn] = []
-    for block in blocks:
-        if isinstance(block, Said) and block.role == "user":
-            found.append(Turn(key=block.uuid, asked=block.text, blocks=[]))
-        elif found:
-            found[-1].blocks.append(block)
-    return found
 
 
 def render_turn(turn: Turn, marks: dict[str, str] | None = None) -> str:

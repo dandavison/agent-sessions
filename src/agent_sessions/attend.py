@@ -32,7 +32,7 @@ from typing import Any, Protocol
 import orjson
 
 from agent_sessions import attending, channel, comment, index, limits, log, query
-from agent_sessions.models import Block, Ran, Said
+from agent_sessions.models import Block, Ran, Said, turns
 
 # A poll that finds nothing returns 304 and costs no rate limit, so this is
 # bounded by politeness rather than budget: one pass is a request for the issue
@@ -264,7 +264,7 @@ def _attending(control: Control, conn: Any, issue: channel.Issue) -> int:
             log.say(
                 f"{tag} {displaced or ''}{'turn before was cut off' if cut_off else ''}".strip()
             )
-        turn = next((t for t in comment.turns(blocks) if t.key), None)
+        turn = next((t for t in turns(blocks) if t.key), None)
         body = (
             comment.render_turn(turn, marks={comment.BY: str(prompt.id), comment.AT: before})
             if turn
@@ -373,7 +373,7 @@ def reconcile(
         t.key: comment.render_turn(
             t, marks=comment.marks_of(have[t.key].body) if t.key in have else None
         )
-        for t in comment.turns(blocks)[-MOST:]
+        for t in turns(blocks)[-MOST:]
         if t.key
     }
     made = changed = gone = 0

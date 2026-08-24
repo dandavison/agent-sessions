@@ -35,6 +35,14 @@ class Source(Protocol):
         """
         ...
 
+    def render_blocks(self, chosen: list[Block], tools: bool) -> Iterator[str]:
+        """The same markdown, for any stretch of a conversation rather than all of it.
+
+        Asking for one turn is asking for fewer blocks, and it must read exactly
+        as that turn reads inside the whole.
+        """
+        ...
+
     def resume_command(self, native_id: str, fork: bool = False, remote: bool = False) -> str:
         """The command line that picks this session up, for a terminal to run.
 

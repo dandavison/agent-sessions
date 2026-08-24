@@ -4,7 +4,7 @@ import sqlite3
 import sys
 import time
 import webbrowser
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import suppress
 from dataclasses import asdict
 from pathlib import Path
@@ -24,6 +24,7 @@ from agent_sessions import (
     index,
     limits,
     log,
+    models,
     query,
     render,
     skill,
@@ -32,6 +33,7 @@ from agent_sessions import (
 )
 from agent_sessions.agents import NotInstalled
 from agent_sessions.forget import forget as forget_session
+from agent_sessions.models import Block
 from agent_sessions.render import Format, Renderer
 from agent_sessions.resume import resume as resume_session
 from agent_sessions.wormhole import WormholeUnavailable
@@ -301,23 +303,57 @@ def _draw(out: Renderer, segment: topology.Segment, prefix: str, last: bool) -> 
         _draw(out, child, below, i == len(segment.children) - 1)
 
 
-@main.command()
-@click.argument("id")
+@main.command(
+    epilog="""\b
+Examples
+  $ agent-sessions cat claude:7e90a7c6 --tools         # the whole thing
+  $ agent-sessions cat claude:7e90a7c6 --last          # only the turn just had
+  $ agent-sessions cat claude:7e90a7c6@9f3c1d20        # only the turn around a point
+"""
+)
+@click.argument("id", metavar="ID[@POINT]")
 @click.option("--tools", is_flag=True, help="Include tool calls and their output.")
 @click.option("--whole", is_flag=True, help="Include branches that were abandoned.")
-def cat(id: str, tools: bool, whole: bool) -> None:
+@click.option("--last", is_flag=True, help="Only the most recent turn.")
+def cat(id: str, tools: bool, whole: bool, last: bool) -> None:
     """Print a session as markdown, read from the transcript itself.
 
     Not from the index, which holds no tool output: `--tools` is the only way
     to see what was actually run.
+
+    A turn is what I asked and everything that followed. `--last` gives the one
+    just had; `@<point>` gives the one that point falls in, taking the points
+    `show --turns` and `tree` print.
     """
     conn = db.connect()
-    session = _resolve(conn, id)
+    session, at = _resolve_point(conn, id)
+    if at and last:
+        raise click.UsageError("--last and a point name different turns. Ask for one of them.")
     source = index.SOURCES[session["agent"]]
     path = Path(session["path"])
     if not path.exists():
         raise click.UsageError(f"{path} is gone. Run `agent-sessions sync`.")
-    for chunk in source.render(path, tools=tools, whole=whole):
+    if not (at or last):
+        _write(source.render(path, tools=tools, whole=whole))
+        return
+    _write(source.render_blocks(_one_turn(source.blocks(path, whole=whole), at, last), tools=tools))
+
+
+def _one_turn(conversation: list[Block], at: str, last: bool) -> list[Block]:
+    said = models.turns(conversation)
+    if not said:
+        raise click.UsageError("nothing was asked in this session, so it holds no turn.")
+    turn = said[-1] if last else models.turn_at(conversation, at)
+    if turn is None:
+        raise click.UsageError(
+            f"{display.point(at)} is in no turn of this session."
+            " Try a point from `agent-sessions show --turns`."
+        )
+    return turn.whole
+
+
+def _write(chunks: Iterator[str]) -> None:
+    for chunk in chunks:
         sys.stdout.write(chunk)
 
 

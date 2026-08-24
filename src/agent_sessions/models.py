@@ -1,5 +1,6 @@
 """The shape of a session, independent of which agent produced it."""
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -130,6 +131,52 @@ class Boundary:
 # One parser produces these; each place that shows a conversation is a
 # formatter over them and nothing more.
 Block = Said | Ran | Boundary
+
+
+@dataclass(frozen=True, slots=True)
+class Turn:
+    """What I asked, and everything that followed until I asked again."""
+
+    key: str
+    asked: str
+    blocks: list[Block]
+
+    @property
+    def whole(self) -> list[Block]:
+        """The turn as it happened. A thread shows the answer; a reader wants both."""
+        return [Said(role="user", text=self.asked, uuid=self.key), *self.blocks]
+
+
+def turns(blocks: Sequence[Block]) -> list[Turn]:
+    """The conversation as turns, which is the unit both readers ask for.
+
+    Work before the first thing I said is not a turn: a window can open in the
+    middle of a session, and the tail of an earlier exchange is not mine to
+    render as an answer.
+    """
+    found: list[Turn] = []
+    for block in blocks:
+        if isinstance(block, Said) and block.role == "user":
+            found.append(Turn(key=block.uuid, asked=block.text, blocks=[]))
+        elif found:
+            found[-1].blocks.append(block)
+    return found
+
+
+def turn_at(blocks: Sequence[Block], uuid: str) -> Turn | None:
+    """The turn a point falls in, whether the point is what was asked or an answer.
+
+    `show --turns` prints prompts and `tree` prints replies, so a point handed
+    back can be either, and both name the same exchange.
+    """
+    return next(
+        (
+            turn
+            for turn in turns(blocks)
+            if uuid in {turn.key, *(b.uuid for b in turn.blocks if isinstance(b, Said))}
+        ),
+        None,
+    )
 
 
 @dataclass(slots=True)

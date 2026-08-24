@@ -76,6 +76,9 @@ class ClaudeSource:
     def render(self, path: Path, tools: bool, whole: bool) -> Iterator[str]:
         return render(_read(path), tools=tools, whole=whole)
 
+    def render_blocks(self, chosen: list[Block], tools: bool) -> Iterator[str]:
+        return render_blocks(chosen, tools=tools)
+
     def blocks(
         self, path: Path, since: str = "", tip: bool = False, whole: bool = False
     ) -> list[Block]:
@@ -480,7 +483,16 @@ def render(records: list[dict[str, Any]], tools: bool, whole: bool) -> Iterator[
     what was actually run. By default it follows the live thread; `whole`
     includes the branches that were abandoned.
     """
-    for block in blocks(records, whole=whole):
+    yield from render_blocks(blocks(records, whole=whole), tools=tools)
+
+
+def render_blocks(chosen: list[Block], tools: bool) -> Iterator[str]:
+    """The same markdown for any stretch of a conversation, not only all of it.
+
+    Asking for one turn is asking for fewer blocks; nothing about how they read
+    changes, so the formatter is the same one and cannot drift from it.
+    """
+    for block in chosen:
         match block:
             case Boundary():
                 yield f"\n---\n\n*Compacted ({block.trigger}): "

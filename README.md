@@ -12,6 +12,7 @@ Design: https://github.com/dandavison/log/issues/289
     agent-sessions show claude:7e90a7c6 --turns      # my turns, with context size at each
     agent-sessions tree claude:7e90a7c6              # branch, compaction and fork topology
     agent-sessions cat claude:7e90a7c6 --tools       # the whole thing, tool calls included
+    agent-sessions cat claude:7e90a7c6 --last        # only the turn I just had, as markdown
     agent-sessions resume claude:7e90a7c6            # pick it back up
     agent-sessions resume claude:7e90a7c6@9f3c1d20   # pick it back up from a point in it
     agent-sessions resume claude:7e90a7c6 --remote    # pick it back up on my phone
@@ -115,6 +116,13 @@ from there — before a compaction, or before the turn that went wrong. An agent
 can only resume a session at its leaf, so this writes the session that ends at
 that point, exactly as a fork is written, and resumes that. The session it came
 from is not touched.
+
+The same points name a turn to read rather than resume. `cat <id> --last` is
+the exchange just had — what I asked and everything that followed — and
+`cat <id>@<point>` is the one that point falls in. It is the whole `cat`,
+narrowed: the same markdown, the same `--tools`, so a turn reads out of the
+session exactly as it reads inside it. That is the thing worth handing to
+someone; the session rarely is.
 
 Not every session was worth having. `forget` takes one out of the index and its
 transcript out of the agent's reach — to `~/.agent-sessions/forgotten`, so being
