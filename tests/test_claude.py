@@ -741,6 +741,38 @@ def test_a_turn_in_flight_is_invisible_from_the_recorded_leaf(tmp_path: Path) ->
     assert "answered while running" in growing
 
 
+def test_the_tip_reaches_past_a_leaf_the_file_has_grown_beyond() -> None:
+    """The recorded leaf lags: in about 1 session in 5 it is not the last record.
+
+    So the end of a session read back off the leaf is missing its final answer,
+    which is the part anyone asked for.
+    """
+    records = [
+        user("u1", None, "kept"),
+        assistant("a1", "u1", [text_block("kept answer")], "req_1"),
+        last_prompt("a1"),
+        user("u2", "a1", "asked next"),
+        assistant("a2", "u2", [text_block("the answer the leaf has not caught up with")], "req_2"),
+    ]
+    reached = [b.text for b in blocks(records, tip=True) if isinstance(b, Said)]
+    assert "the answer the leaf has not caught up with" in reached
+
+
+def test_the_tip_is_still_on_the_branch_the_leaf_names() -> None:
+    """Reaching for the end of the file instead would land on the abandoned one.
+
+    The leaf says which branch is live — that is the whole reason to consult it.
+    Where that branch ends is a question about the file, not about the leaf.
+    """
+    records = [
+        user("u1", None, "kept"),
+        assistant("a1", "u1", [text_block("kept answer")], "req_1"),
+        user("u2", "u1", "abandoned"),
+        last_prompt("a1"),
+    ]
+    assert "abandoned" not in [b.text for b in blocks(records, tip=True) if isinstance(b, Said)]
+
+
 def test_the_recorded_leaf_still_decides_once_nothing_is_running(tmp_path: Path) -> None:
     """It is what keeps a rewound session from reading as its abandoned branch."""
     records = [

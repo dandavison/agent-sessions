@@ -4,7 +4,7 @@ from pathlib import Path
 
 import orjson
 import pytest
-from conftest import SESSION, assistant, text_block, tool_result, tool_use, user
+from conftest import SESSION, assistant, last_prompt, text_block, tool_result, tool_use, user
 
 from agent_sessions import cli, db, query
 from agent_sessions.models import Node, Session
@@ -247,6 +247,8 @@ def transcribed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
         assistant("a2", "u2", [tool_use("Bash")], "req_2"),
         tool_result("r2", "a2"),
         assistant("a3", "r2", [text_block("second answer")], "req_2"),
+        # Written mid-turn and left behind by it, as the real thing leaves it.
+        last_prompt("a2"),
     ]
     project = tmp_path / "-Users-dan-src-wormhole"
     project.mkdir()
