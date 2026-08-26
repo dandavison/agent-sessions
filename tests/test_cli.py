@@ -289,3 +289,36 @@ def test_cat_cannot_be_asked_for_two_different_turns(transcribed: str, run) -> N
     code, _, err = run("cat", f"{transcribed}@u1", "--last")
     assert code == cli.EXIT_USAGE
     assert "--last" in err
+
+
+# --- a point is not a session, and the difference is checkable --------------
+
+
+def test_a_point_handed_over_alone_says_where_it_lives(transcribed: str, run) -> None:
+    """A longer prefix can never resolve it, so saying so sends you nowhere."""
+    code, _, err = run("cat", "claude:u2")
+    assert code == cli.EXIT_USAGE
+    assert f"{transcribed}@u2" in err
+
+
+def test_a_point_given_to_a_command_that_takes_none_says_so(transcribed: str, run) -> None:
+    code, _, err = run("show", f"{transcribed}@u2")
+    assert code == cli.EXIT_USAGE
+    assert "not a point" in err
+    assert transcribed in err
+
+
+def test_a_session_that_really_is_missing_still_reads_that_way(transcribed: str, run) -> None:
+    code, _, err = run("show", "claude:nosuchthing")
+    assert code == cli.EXIT_USAGE
+    assert "no single session matches" in err
+
+
+def test_showing_turns_names_a_command_that_takes_one(transcribed: str, run) -> None:
+    """The column of points is unusable until something says where they go."""
+    _, _, err = run("show", transcribed, "--turns")
+    suggested = err.split("Next: agent-sessions ")[1].split("   (")[0].split()
+    assert "@" in suggested[1]
+    code, out, _ = run(*suggested)
+    assert code == 0
+    assert "second question" in out
