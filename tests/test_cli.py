@@ -98,7 +98,7 @@ def test_finding_something_names_the_next_command(
 
 def test_show_names_what_comes_after_it(indexed: Path, run) -> None:
     _, _, err = run("show", ID)
-    assert f"agent-sessions cat {ID} --tools" in err
+    assert f"agent-sessions cat {ID}@u1 --tools" in err
 
 
 def test_the_next_command_carries_a_real_id_not_a_placeholder(indexed: Path, run) -> None:

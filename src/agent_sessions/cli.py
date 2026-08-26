@@ -263,7 +263,10 @@ def show(id: str, turns_only: bool, fmt: str | None, as_json: bool, quiet: bool)
         out.record(display.details(session))
         out.line("")
     out.table([display.turn(t) for t in said], quiet_key="at")
-    _next(out, session["id"], "cat {id} --tools", "tree", "resume", "resume --fork")
+    # Addressed at the last turn, because a column of points is unusable until
+    # something says where one goes, and this is the only place they are printed.
+    at = f"@{display.point(said[-1]['uuid'])}" if said else ""
+    _next(out, session["id"] + at, "cat {id} --tools", "cat --last", "tree", "resume")
 
 
 @main.command()
@@ -665,10 +668,27 @@ def skills_preview() -> None:
 def _resolve(conn: sqlite3.Connection, id: str) -> dict:
     session = query.get(conn, id)
     if session is None:
-        raise click.UsageError(
-            f"no single session matches {id!r}. Try `agent-sessions search` or a longer prefix."
-        )
+        raise click.UsageError(_unresolved(conn, id))
     return session
+
+
+def _unresolved(conn: sqlite3.Connection, id: str) -> str:
+    """Points and sessions are both bare hex, and only some commands take both.
+
+    Either way of confusing them is checkable, so neither has to be reported as
+    a session that is not there under advice to lengthen a prefix that cannot
+    resolve it however long it gets.
+    """
+    named, at = query.split_point(id)
+    if at:
+        return (
+            f"this command takes a session, not a point. Try `{named}`,"
+            f" or `agent-sessions cat {id}` for that turn alone."
+        )
+    bare = id.partition(":")[2] or id
+    if holder := query.session_of(conn, bare):
+        return f"{bare} is a point in {holder}, not a session. Try `{holder}@{bare}`."
+    return f"no single session matches {id!r}. Try `agent-sessions search` or a longer prefix."
 
 
 def _resolve_point(conn: sqlite3.Connection, id: str) -> tuple[dict, str]:

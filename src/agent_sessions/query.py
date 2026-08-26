@@ -181,6 +181,18 @@ def node(conn: sqlite3.Connection, session_id: str, at: str) -> dict | None:
     return dict(rows[0])
 
 
+def session_of(conn: sqlite3.Connection, at: str) -> str | None:
+    """The session a point belongs to, for when one is handed over on its own.
+
+    A point is only addressable inside a session, so an id that turns out to be
+    one is a mistake with an answer rather than a session that is not there.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT session_id FROM node WHERE uuid LIKE ? LIMIT 2", (f"{at}%",)
+    ).fetchall()
+    return str(rows[0]["session_id"]) if len(rows) == 1 else None
+
+
 def turns(conn: sqlite3.Connection, session_id: str) -> list[dict]:
     """What I said, in order, with how large the context had grown by then.
 
