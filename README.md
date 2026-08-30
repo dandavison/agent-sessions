@@ -33,7 +33,8 @@ errors go to stderr, so only data reaches stdout.
 link is enough — from the page, a note, a chat message, or an agent's output.
 
 A session's page is the conversation, rendered as it was written rather than
-recited as its own source. It lists my prompts, each folding away the answer
+recited as its own source, with code coloured by the language the fence
+already named — and nothing guessed for the fences that named none. It lists my prompts, each folding away the answer
 it got. Hover a turn and it offers, in icons, to copy that turn as markdown,
 to copy everything from it on, or to resume there — what `cat --last`,
 `cat <id>@<point>` and `resume <id>@<point>` give, without the terminal. The

@@ -21,6 +21,10 @@ from urllib.parse import parse_qs, quote, urlencode, urlsplit
 import httpx
 import orjson
 from markdown_it import MarkdownIt
+from pygments import highlight
+from pygments.formatters.html import HtmlFormatter
+from pygments.lexers import get_lexer_by_name
+from pygments.util import ClassNotFound
 
 from agent_sessions import (
     attend,
@@ -245,7 +249,7 @@ def _shown(answered: list[Block], tools: bool) -> str:
                 went = " failed" if block.is_error else ""
                 out.append(
                     f"<div class=ran><span class=tool>{_h(block.tool)}</span>"
-                    f"<pre>{_h(_json(block.input))}</pre>"
+                    f"{_coloured(_json(block.input), 'json')}"
                     f"<pre class='out{went}'>{_h(block.output)}</pre></div>"
                 )
             case Boundary():
@@ -262,14 +266,40 @@ def _json(value: object) -> str:
     return orjson.dumps(value, option=orjson.OPT_INDENT_2).decode()
 
 
+def _highlight(code: str, language: str, _attrs: str) -> str:
+    """A fenced block, coloured by what it says it is. Nothing is ever guessed.
+
+    Returning nothing hands the block back to markdown-it, which escapes it and
+    shows it plain — which is the right answer for a fence with no language on
+    it, and for output that only looks like a language.
+    """
+    if not language:
+        return ""
+    try:
+        lexer = get_lexer_by_name(language)
+    except ClassNotFound:
+        return ""
+    return highlight(code, lexer, FORMATTER)
+
+
 # `html=False` is load-bearing, not a preference: every string reaching this is
 # read off this machine — an agent's prose, and the output of what it ran — and
 # the default preset would pass a <script> in any of it straight into the page.
-MARKDOWN = MarkdownIt("commonmark", {"html": False}).enable(["table", "strikethrough"])
+# `highlight` is trusted to return markup, which is why nothing but Pygments,
+# whose business is escaping what it colours, is allowed to answer it.
+FORMATTER = HtmlFormatter(cssclass="hl", nowrap=False)
+MARKDOWN = MarkdownIt("commonmark", {"html": False, "highlight": _highlight}).enable(
+    ["table", "strikethrough"]
+)
 
 
 def _markdown(text: str) -> str:
     return MARKDOWN.render(text)
+
+
+def _coloured(code: str, language: str) -> str:
+    """Code that arrived as itself rather than inside a fence: a tool's arguments."""
+    return highlight(code, get_lexer_by_name(language), FORMATTER)
 
 
 def _turn(id: str, t: dict, carried: Carried | None) -> str:
@@ -293,7 +323,8 @@ def _turn(id: str, t: dict, carried: Carried | None) -> str:
         else ""
     )
     answer = (
-        f"<details class=answer><summary>answer</summary>"
+        f"<details class=answer><summary aria-label='show the answer'"
+        f" title='show the answer'>{CHEVRON}</summary>"
         f"<div class=md>{carried.shown}</div></details>"
         if carried
         else ""
@@ -597,6 +628,7 @@ CLIPBOARD_ON = _icon(
 )
 PROMPT = _icon("M3.4 4.2 6.9 8l-3.5 3.8", "M8.6 11.8h4")
 CODE = _icon("M6 4.8 2.8 8 6 11.2", "M10 4.8 13.2 8 10 11.2")
+CHEVRON = _icon("M6.2 3.6 10.6 8l-4.4 4.4")
 
 
 # The only script in the UI, and it moves nothing but text already on the page.
@@ -709,8 +741,15 @@ h2 .toggle.on { color: var(--accent);
                 background: color-mix(in oklab, var(--accent) 14%, transparent) }
 
 .answer { margin-top: 2px }
-.answer summary { color: var(--dim); font-size: 12px; cursor: pointer; width: fit-content }
-.answer[open] summary { margin-bottom: 6px }
+/* Its own control and its own label. A word beside it says only what the shape
+   of the thing below already says. */
+.answer summary { color: var(--dim); cursor: pointer; width: fit-content; list-style: none;
+                  display: flex; padding: 2px 3px; border-radius: 5px }
+.answer summary::-webkit-details-marker { display: none }
+.answer summary svg { width: 1.05em; height: 1.05em; transition: rotate .12s }
+.answer summary:hover { color: var(--accent) }
+.answer[open] summary { margin-bottom: 4px }
+.answer[open] summary svg { rotate: 90deg }
 
 /* What the agent wrote, and what I asked, both read as they were written. The
    ceiling is on the answer alone: a prompt is short and a turn is not. */
@@ -759,6 +798,28 @@ footer { margin-top: 40px; padding-top: 14px; border-top: 1px solid var(--line);
   .resume { margin-left: 14px }
   td, th { padding: 11px 6px }
 }
+"""
+
+
+def _theme(style: str) -> str:
+    """Pygments' rules for one style, scoped to what it colours.
+
+    Its unscoped `pre` and line-number rules are dropped: we ask for neither,
+    and the first of them would reach every block on the page. The wrapper's
+    own background goes too, so the block keeps the one the page gave it.
+    """
+    rules = HtmlFormatter(cssclass="hl", style=style).get_style_defs(".hl")
+    return " ".join(line for line in rules.splitlines() if line.startswith(".hl"))
+
+
+# Light and dark are two palettes over the same class names, chosen by the same
+# query the rest of the page is themed by.
+CSS += f"""
+{_theme("friendly")}
+@media (prefers-color-scheme: dark) {{ {_theme("github-dark")} }}
+/* Last word, over both palettes: the wrapper carries a background of its own,
+   and the block already has the one the page gave every other block. */
+.hl {{ background: none; margin: 0 }}
 """
 
 

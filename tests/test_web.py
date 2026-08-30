@@ -642,3 +642,10 @@ def test_a_fence_in_no_language_is_still_shown(indexed: Path) -> None:
         )
     )
     assert "plain text" in web.handle(f"/session/{ID}").body
+
+
+def test_nothing_is_labelled_in_words_beside_its_own_control(indexed: Path) -> None:
+    """The fold said `answer` over an answer. The control is the whole of the label."""
+    body = web.handle(f"/session/{ID}").body
+    assert "<summary" in body
+    assert ">answer<" not in body
