@@ -288,9 +288,12 @@ def _highlight(code: str, language: str, _attrs: str) -> str:
 # `highlight` is trusted to return markup, which is why nothing but Pygments,
 # whose business is escaping what it colours, is allowed to answer it.
 FORMATTER = HtmlFormatter(cssclass="hl", nowrap=False)
-MARKDOWN = MarkdownIt("commonmark", {"html": False, "highlight": _highlight}).enable(
-    ["table", "strikethrough"]
-)
+# `linkify` is on because an agent writes URLs bare — the issue it just opened,
+# the commit it just pushed — and one that cannot be clicked gets retyped. It
+# only ever makes links out of schemes a browser was going to allow anyway.
+MARKDOWN = MarkdownIt(
+    "commonmark", {"html": False, "linkify": True, "highlight": _highlight}
+).enable(["table", "strikethrough", "linkify"])
 
 
 def _markdown(text: str) -> str:
