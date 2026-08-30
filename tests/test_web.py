@@ -540,3 +540,35 @@ def test_github_being_unreachable_is_reported_not_raised(
 
     monkeypatch.setattr(web, "control", Fake)
     assert web.handle(f"/issue/{ID}").status == 502
+
+
+# --- taking a turn away with you --------------------------------------------
+
+
+def test_a_turn_carries_the_answer_it_got(indexed: Path) -> None:
+    """The page held my prompts and nothing else, so there was nothing to take."""
+    assert "Because of submodules." in web.handle(f"/session/{ID}").body
+
+
+def test_what_a_turn_ran_is_asked_for(indexed: Path) -> None:
+    """Folded away is not the same as absent: tool output is most of the weight."""
+    assert "Bash" not in web.handle(f"/session/{ID}").body
+    assert "Bash" in web.handle(f"/session/{ID}", "tools=1").body
+
+
+def test_each_turn_offers_itself_and_everything_after_it(indexed: Path) -> None:
+    body = web.handle(f"/session/{ID}").body
+    assert body.count("data-copy=turn") == 1
+    assert body.count("data-copy=rest") == 1
+
+
+def test_the_answer_is_folded_away_until_it_is_wanted(indexed: Path) -> None:
+    body = web.handle(f"/session/{ID}").body
+    assert "<details class=answer>" in body
+
+
+def test_a_session_whose_transcript_has_gone_still_has_a_page(indexed: Path) -> None:
+    """The index holds the turns; only what they carry needs the file."""
+    response = web.handle(f"/session/{STRAY}")
+    assert response.status == 200
+    assert "data-copy" not in response.body
