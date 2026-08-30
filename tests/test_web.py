@@ -4,6 +4,7 @@ Pages are exercised through `web.handle`, which is where the routing lives; the
 socket underneath it is plumbing and has nothing to decide.
 """
 
+import html
 from pathlib import Path
 
 import orjson
@@ -17,6 +18,7 @@ from agent_sessions.sources.claude import encode
 ID = "claude:7e90a7c6-ce43-4dfd-9d7c-8eb01ac7ccf2"
 NATIVE = ID.split(":")[1]
 STRAY = "claude:00000000-0000-0000-0000-000000000000"
+ANSWER = "Because of **submodules**.\n\n```sh\ngit submodule status\n```"
 
 
 @pytest.fixture
@@ -35,7 +37,7 @@ def indexed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         user("u1", None, "why is conform relocating worktrees"),
         assistant("a1", "u1", [tool_use("Bash")]),
         tool_result("t1", "a1"),
-        assistant("a2", "t1", [text_block("Because of submodules.")]),
+        assistant("a2", "t1", [text_block(ANSWER)]),
     ]
     transcript.write_bytes(b"\n".join(orjson.dumps(r) for r in records))
 
@@ -294,10 +296,13 @@ def test_a_session_page_shows_its_turns_and_context(indexed: Path) -> None:
     assert "wormhole" in body
 
 
-def test_a_session_page_offers_the_transcript_and_a_resume(indexed: Path) -> None:
-    body = web.handle(f"/session/{ID}").body
-    assert f"/transcript/{ID}" in body
-    assert f"/resume/{ID}" in body
+def test_a_session_page_offers_a_resume(indexed: Path) -> None:
+    assert f"/resume/{ID}" in web.handle(f"/session/{ID}").body
+
+
+def test_the_transcript_page_is_gone(indexed: Path) -> None:
+    """One page shows a conversation now, and it is the session's own."""
+    assert web.handle(f"/transcript/{ID}").status == 404
 
 
 def test_a_prefix_identifies_a_session(indexed: Path) -> None:
@@ -353,22 +358,6 @@ def test_a_lost_branch_does_not_strike_out_what_came_after_it(
     body = web.handle(f"/session/{ID}").body
     lost = body.index("class='abandoned'")
     assert body.index("</span>", lost) < body.index("<ul>", lost)
-
-
-# --- the transcript --------------------------------------------------------
-
-
-def test_the_transcript_comes_from_the_file(indexed: Path) -> None:
-    assert "Because of submodules." in web.handle(f"/transcript/{ID}").body
-
-
-def test_tool_calls_are_off_until_asked_for(indexed: Path) -> None:
-    assert "Bash" not in web.handle(f"/transcript/{ID}").body
-    assert "Bash" in web.handle(f"/transcript/{ID}", "tools=1").body
-
-
-def test_a_transcript_that_has_gone_is_reported(indexed: Path) -> None:
-    assert web.handle(f"/transcript/{STRAY}").status == 404
 
 
 # --- markup ----------------------------------------------------------------
@@ -547,7 +536,7 @@ def test_github_being_unreachable_is_reported_not_raised(
 
 def test_a_turn_carries_the_answer_it_got(indexed: Path) -> None:
     """The page held my prompts and nothing else, so there was nothing to take."""
-    assert "Because of submodules." in web.handle(f"/session/{ID}").body
+    assert "submodules" in web.handle(f"/session/{ID}").body
 
 
 def test_what_a_turn_ran_is_asked_for(indexed: Path) -> None:
@@ -572,3 +561,52 @@ def test_a_session_whose_transcript_has_gone_still_has_a_page(indexed: Path) -> 
     response = web.handle(f"/session/{STRAY}")
     assert response.status == 200
     assert "data-copy" not in response.body
+
+
+# --- a conversation, read as it was written ---------------------------------
+
+
+def test_an_answer_is_rendered_not_recited(indexed: Path) -> None:
+    """Markdown read as its own source is the one thing a browser is not needed for."""
+    body = web.handle(f"/session/{ID}").body
+    assert "<strong>submodules</strong>" in body
+    assert "<code" in body
+    assert "**submodules**" not in body.split("data-md=")[0]
+
+
+def test_what_an_agent_wrote_cannot_become_markup(indexed: Path, tmp_path: Path) -> None:
+    """Tool output is read off this machine and rendered into a page I then open."""
+    conn = db.connect()
+    path = Path(query.get(conn, ID)["path"])
+    conn.close()
+    path.write_bytes(
+        b"\n".join(
+            orjson.dumps(r)
+            for r in [
+                user("u1", None, "what does it do"),
+                assistant("a1", "u1", [text_block("<img src=x onerror=alert(1)>")]),
+            ]
+        )
+    )
+    body = web.handle(f"/session/{ID}").body
+    assert "<img src=x" not in body
+    assert "onerror" not in body or "&lt;img" in body
+
+
+def test_the_markdown_is_still_there_to_be_copied(indexed: Path) -> None:
+    """What is rendered cannot be pasted back; the source of it is what a copy takes."""
+    body = web.handle(f"/session/{ID}").body
+    assert "**submodules**" in html.unescape(body)
+
+
+def test_the_buttons_are_icons_that_still_say_what_they_are(indexed: Path) -> None:
+    body = web.handle(f"/session/{ID}").body
+    assert "<svg" in body
+    assert body.count("aria-label") >= 3
+
+
+def test_a_turn_offers_to_be_resumed_from_where_the_row_does(indexed: Path) -> None:
+    """The point stopped being the link; the action is the link, as in the index."""
+    body = web.handle(f"/session/{ID}").body
+    assert f"class=resume href='/resume/{ID}@u1'" in body
+    assert "class=point href=" not in body
