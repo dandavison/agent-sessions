@@ -20,7 +20,18 @@ from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 import httpx
 
-from agent_sessions import attend, channel, db, display, index, log, query, resume, topology
+from agent_sessions import (
+    attend,
+    channel,
+    db,
+    display,
+    index,
+    log,
+    models,
+    query,
+    resume,
+    topology,
+)
 from agent_sessions.wormhole import WormholeUnavailable
 
 HOST = "127.0.0.1"
@@ -153,13 +164,18 @@ def _session(conn: sqlite3.Connection, id: str, params: dict[str, str]) -> Respo
     if session is None:
         return _error(404, f"No single session matches {id!r}.")
 
+    tools = params.get("tools") in ("1", "true")
     shape = topology.of(conn, session)
     fields = "".join(
         f"<div class=field><dt>{_h(k)}<dd>{_h(str(v))}</div>"
         for k, v in display.details(session).items()
         if v
     )
-    said = "".join(_turn(session["id"], t) for t in query.turns(conn, session["id"]))
+    carried = _answers(session, tools)
+    said = "".join(
+        _turn(session["id"], t, carried.get(t["uuid"], ""))
+        for t in query.turns(conn, session["id"])
+    )
     return _page(
         session["title"] or session["id"],
         _controls(params, "recent") + _projects(conn),
@@ -169,18 +185,64 @@ def _session(conn: sqlite3.Connection, id: str, params: dict[str, str]) -> Respo
         f" <a class=button href='/transcript/{quote(session['id'], safe=':')}'>transcript</a></p>",
         f"<dl class=details>{fields}</dl>",
         f"<h2>shape</h2>{_tree(session['id'], shape)}",
-        f"<h2>turns</h2><ol class=turns>{said}</ol>" if said else "",
+        f"<h2>turns</h2>{_tools_link(session['id'], tools) if carried else ''}"
+        f"<ol class=turns>{said}</ol>"
+        if said
+        else "",
+        COPY_JS if carried else "",
     )
 
 
-def _turn(id: str, t: dict) -> str:
+def _answers(session: dict, tools: bool) -> dict[str, str]:
+    """Each turn as the markdown it would be handed over as, keyed by its point.
+
+    From the transcript, because the index holds no tool output and no prose of
+    the agent's — the page has only ever been able to show what I said. Off the
+    live thread, so the last answer is there rather than one short of it.
+
+    Tool output is 30x the weight of the prose around it, so it is asked for.
+    """
+    path = Path(session["path"])
+    if not path.exists():
+        return {}
+    source = index.SOURCES[session["agent"]]
+    return {
+        turn.key: "".join(source.render_blocks(turn.whole, tools=tools))
+        for turn in models.turns(source.blocks(path, tip=True))
+    }
+
+
+def _turn(id: str, t: dict, markdown: str) -> str:
+    """The prompt, what it is addressed by, and — folded away — what it got back.
+
+    The copy buttons sit in the metadata line and wait to be hovered, as the
+    resume links in a row of the index do. Each turn carries its own markdown,
+    so taking one, or everything from one on, is done without asking the server
+    again — and what is copied is exactly what unfolding shows.
+    """
     d = display.turn(t)
     context = f"<span class=num>{_h(d['context'])}</span>" if d["context"] else ""
     point = f"<a class=point href='{_resume_link(id, at=t['uuid'])}'>{_h(d['at'])}</a>"
-    return (
-        f"<li class=turn><div class=meta>{_h(d['when'])} · {_h(d['role'])} {context} {point}</div>"
-        f"<div class=text>{_h(d['text'])}</div>"
+    copy = (
+        "<button class=copy data-copy=turn>copy</button>"
+        "<button class=copy data-copy=rest>copy from here</button>"
+        if markdown
+        else ""
     )
+    answer = (
+        f"<details class=answer><summary>answer</summary><pre>{_h(markdown)}</pre></details>"
+        if markdown
+        else ""
+    )
+    return (
+        f"<li class=turn><div class=meta>{_h(d['when'])} · {_h(d['role'])} {context} {point}"
+        f"{copy}</div><div class=text>{_h(d['text'])}</div>{answer}"
+    )
+
+
+def _tools_link(id: str, on: bool) -> str:
+    where = f"/session/{quote(id, safe=':')}" + ("" if on else "?tools=1")
+    return f"<p class=actions><a class='button{' on' if on else ''}' href='{where}'>tools</a></p>"
 
 
 def _tree(id: str, shape: topology.Topology) -> str:
@@ -472,6 +534,28 @@ def _h(text: object) -> str:
     return html.escape("" if text is None else str(text))
 
 
+# The only script in the UI, and it moves nothing but text already on the page.
+# `writeText` needs a secure context, which `http://localhost` is and the address
+# `serve --lan` hands a phone is not, so the button says when it could not.
+COPY_JS = """<script>
+document.addEventListener('click', event => {
+  const button = event.target.closest('button.copy')
+  if (!button) return
+  const turns = [...document.querySelectorAll('.turn')]
+  const from = turns.indexOf(button.closest('.turn'))
+  const wanted = button.dataset.copy === 'rest' ? turns.slice(from) : [turns[from]]
+  // A turn off the live branch, or from before a compaction, carries nothing.
+  const carried = wanted.map(turn => turn.querySelector('.answer pre')).filter(Boolean)
+  const said = carried.map(pre => pre.textContent).join('\\n')
+  const label = button.textContent
+  navigator.clipboard.writeText(said).then(
+    () => { button.textContent = 'copied' },
+    () => { button.textContent = 'no clipboard here' },
+  ).finally(() => setTimeout(() => { button.textContent = label }, 1200))
+})
+</script>"""
+
+
 CSS = """
 :root { color-scheme: light dark; --fg: #1c1c1e; --bg: #fdfdfd; --dim: #6b6b70;
         --line: #e2e2e5; --accent: #0a58ca; --warn: #b3261e; --live: #1a7f37; }
@@ -538,6 +622,14 @@ tr:hover td .resume, td .resume:focus-visible { opacity: 1 }
 .turn { border-top: 1px solid var(--line); padding: 12px 0 }
 .turn .meta { color: var(--dim); font-size: 12px; margin-bottom: 4px }
 .turn .text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 22em; overflow: auto }
+.copy { border: 0; background: none; padding: 0; margin-left: 10px; cursor: pointer;
+        color: var(--accent); font: inherit; opacity: 0; transition: opacity .08s }
+.turn:hover .copy, .copy:focus-visible { opacity: 1 }
+.answer { margin-top: 6px }
+.answer summary { color: var(--dim); font-size: 12px; cursor: pointer; width: fit-content }
+.answer pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; margin: 6px 0 0;
+              font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+              max-height: 32em; overflow: auto }
 .transcript { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px;
               font-family: ui-monospace, SFMono-Regular, Menlo, monospace }
 footer { margin-top: 40px; padding-top: 14px; border-top: 1px solid var(--line);
@@ -547,7 +639,7 @@ footer { margin-top: 40px; padding-top: 14px; border-top: 1px solid var(--line);
    Nothing hovers, so an action that waits to be hovered is an action that is
    never found. */
 @media (hover: none) {
-  td .resume { opacity: 1 }
+  td .resume, .copy { opacity: 1 }
 }
 /* And no room for the columns that are only worth a glance. */
 @media (max-width: 640px) {

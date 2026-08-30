@@ -32,6 +32,14 @@ errors go to stderr, so only data reaches stdout.
 `http://localhost:7118/resume/claude:7e90a7c6` picks the session back up. So a
 link is enough — from the page, a note, a chat message, or an agent's output.
 
+A session's page lists my prompts, each folding away the answer it got. Hover
+a turn and it offers to copy that turn as markdown, or everything from it on —
+what `cat --last` and `cat <id>@<point>` give, without the terminal. `tools`
+puts what was run into the fold, and into what is copied; it is asked for
+because tool output is some thirty times the weight of the prose around it.
+Turns from before a compaction, or off the branch that stayed live, carry
+nothing and so offer nothing.
+
 Add `?remote=1` and the session is started with the agent's own remote control
 on, and the browser is sent after it. This is for the phone. Claude Code can
 already put the session in front of you on a phone; what it cannot do is find
