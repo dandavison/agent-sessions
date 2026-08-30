@@ -19,10 +19,9 @@ from conftest import (
 )
 
 from agent_sessions.models import Delta, Running, Said
-from agent_sessions.sources.claude import ClaudeSource, blocks, parse
+from agent_sessions.sources.claude import ClaudeSource, blocks, parse, render_blocks
 from agent_sessions.sources.claude import _read as read
 from agent_sessions.sources.claude import live as claude_live
-from agent_sessions.sources.claude import render as claude_render
 
 SESSION = "7e90a7c6-ce43-4dfd-9d7c-8eb01ac7ccf2"
 
@@ -575,7 +574,7 @@ def test_a_rewind_at_a_silent_node_is_still_a_branch(tmp_path: Path) -> None:
 
 
 def rendered(records: list[dict[str, Any]], tools: bool = False, whole: bool = False) -> str:
-    return "".join(claude_render(records, tools=tools, whole=whole))
+    return "".join(render_blocks(blocks(records, whole=whole), tools=tools))
 
 
 def test_render_prose_as_markdown() -> None:

@@ -19,6 +19,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 import httpx
+import orjson
+from markdown_it import MarkdownIt
 
 from agent_sessions import (
     attend,
@@ -32,6 +34,7 @@ from agent_sessions import (
     resume,
     topology,
 )
+from agent_sessions.models import Block, Boundary, Ran, Said
 from agent_sessions.wormhole import WormholeUnavailable
 
 HOST = "127.0.0.1"
@@ -61,8 +64,6 @@ def handle(path: str, query_string: str = "") -> Response:
             return _resume(conn, id, remote=params.get("remote") in ("1", "true"))
         if id := _tail(path, "/issue/"):
             return _issue(conn, id)
-        if id := _tail(path, "/transcript/"):
-            return _transcript(conn, id, params)
         if id := _tail(path, "/session/"):
             return _session(conn, id, params)
         return _error(404, "No such page.")
@@ -173,19 +174,17 @@ def _session(conn: sqlite3.Connection, id: str, params: dict[str, str]) -> Respo
     )
     carried = _answers(session, tools)
     said = "".join(
-        _turn(session["id"], t, carried.get(t["uuid"], ""))
-        for t in query.turns(conn, session["id"])
+        _turn(session["id"], t, carried.get(t["uuid"])) for t in query.turns(conn, session["id"])
     )
     return _page(
         session["title"] or session["id"],
         _controls(params, "recent") + _projects(conn),
         _flash(params),
         f"<h1>{_h(session['title'] or session['id'])}</h1>",
-        f"<p class=actions>{_actions(session['id'])}"
-        f" <a class=button href='/transcript/{quote(session['id'], safe=':')}'>transcript</a></p>",
+        f"<p class=actions>{_actions(session['id'])}</p>",
         f"<dl class=details>{fields}</dl>",
         f"<h2>shape</h2>{_tree(session['id'], shape)}",
-        f"<h2>turns</h2>{_tools_link(session['id'], tools) if carried else ''}"
+        f"<h2>turns{_tools_button(session['id'], tools) if carried else ''}</h2>"
         f"<ol class=turns>{said}</ol>"
         if said
         else "",
@@ -193,56 +192,130 @@ def _session(conn: sqlite3.Connection, id: str, params: dict[str, str]) -> Respo
     )
 
 
-def _answers(session: dict, tools: bool) -> dict[str, str]:
-    """Each turn as the markdown it would be handed over as, keyed by its point.
+@dataclass(frozen=True, slots=True)
+class Carried:
+    """What a turn is worth showing and what it is worth taking away.
+
+    Two forms of the same thing, because neither does the other's job: markdown
+    recited at a reader is the one thing a browser is not needed for, and HTML
+    is not what anyone wants on their clipboard.
+    """
+
+    shown: str
+    source: str
+
+
+def _answers(session: dict, tools: bool) -> dict[str, Carried]:
+    """What each turn got back, keyed by the point that addresses it.
 
     From the transcript, because the index holds no tool output and no prose of
     the agent's — the page has only ever been able to show what I said. Off the
     live thread, so the last answer is there rather than one short of it.
 
-    Tool output is 30x the weight of the prose around it, so it is asked for.
+    Tool output is some thirty times the weight of the prose around it, so it
+    is asked for. What is copied is the whole turn, my own prompt included: it
+    is the exchange that is worth handing to someone, not half of it.
     """
     path = Path(session["path"])
     if not path.exists():
         return {}
     source = index.SOURCES[session["agent"]]
     return {
-        turn.key: "".join(source.render_blocks(turn.whole, tools=tools))
+        turn.key: Carried(
+            shown=_shown(turn.blocks, tools),
+            source="".join(source.render_blocks(turn.whole, tools=tools)),
+        )
         for turn in models.turns(source.blocks(path, tip=True))
     }
 
 
-def _turn(id: str, t: dict, markdown: str) -> str:
+def _shown(answered: list[Block], tools: bool) -> str:
+    """One answer as HTML. The third formatter over the blocks one parser makes.
+
+    Not the markdown put through a renderer: that carries a `## assistant` over
+    every stretch of prose, which is how a transcript tells the two sides apart
+    and is noise inside a fold that holds one side only.
+    """
+    out = []
+    for block in answered:
+        match block:
+            case Said(text=text):
+                out.append(_markdown(text))
+            case Ran() if tools:
+                went = " failed" if block.is_error else ""
+                out.append(
+                    f"<div class=ran><span class=tool>{_h(block.tool)}</span>"
+                    f"<pre>{_h(_json(block.input))}</pre>"
+                    f"<pre class='out{went}'>{_h(block.output)}</pre></div>"
+                )
+            case Boundary():
+                out.append(
+                    f"<p class=edge>compacted ({_h(block.trigger)}): "
+                    f"{block.pre_tokens:,} → {block.post_tokens:,} tokens</p>"
+                )
+            case _:
+                pass
+    return "".join(out)
+
+
+def _json(value: object) -> str:
+    return orjson.dumps(value, option=orjson.OPT_INDENT_2).decode()
+
+
+# `html=False` is load-bearing, not a preference: every string reaching this is
+# read off this machine — an agent's prose, and the output of what it ran — and
+# the default preset would pass a <script> in any of it straight into the page.
+MARKDOWN = MarkdownIt("commonmark", {"html": False}).enable(["table", "strikethrough"])
+
+
+def _markdown(text: str) -> str:
+    return MARKDOWN.render(text)
+
+
+def _turn(id: str, t: dict, carried: Carried | None) -> str:
     """The prompt, what it is addressed by, and — folded away — what it got back.
 
-    The copy buttons sit in the metadata line and wait to be hovered, as the
-    resume links in a row of the index do. Each turn carries its own markdown,
-    so taking one, or everything from one on, is done without asking the server
-    again — and what is copied is exactly what unfolding shows.
+    The actions sit in the metadata line and wait for the turn to be hovered,
+    as the resume links in a row of the index do; the point beside them is text
+    to copy into a command, not a third way to resume.
+
+    Each turn carries its own markdown as well as its rendering, so taking one,
+    or everything from one on, needs no second word with the server.
     """
     d = display.turn(t)
-    context = f"<span class=num>{_h(d['context'])}</span>" if d["context"] else ""
-    point = f"<a class=point href='{_resume_link(id, at=t['uuid'])}'>{_h(d['at'])}</a>"
-    copy = (
-        "<button class=copy data-copy=turn>copy</button>"
-        "<button class=copy data-copy=rest>copy from here</button>"
-        if markdown
+    context = f" · <span class=num>{_h(d['context'])}</span>" if d["context"] else ""
+    doing = (
+        f"<button class=act data-copy=turn aria-label='copy this turn as markdown'"
+        f" title='copy this turn as markdown'>{CLIPBOARD}</button>"
+        f"<button class=act data-copy=rest aria-label='copy from here on as markdown'"
+        f" title='copy from here on as markdown'>{CLIPBOARD_ON}</button>"
+        if carried
         else ""
     )
     answer = (
-        f"<details class=answer><summary>answer</summary><pre>{_h(markdown)}</pre></details>"
-        if markdown
+        f"<details class=answer><summary>answer</summary>"
+        f"<div class=md>{carried.shown}</div></details>"
+        if carried
         else ""
     )
+    source = f" data-md='{_h(carried.source)}'" if carried else ""
     return (
-        f"<li class=turn><div class=meta>{_h(d['when'])} · {_h(d['role'])} {context} {point}"
-        f"{copy}</div><div class=text>{_h(d['text'])}</div>{answer}"
+        f"<li class=turn{source}><div class=meta>{_h(d['when'])} · {_h(d['role'])}{context}"
+        f" <span class=point>{_h(d['at'])}</span><span class=doing>{doing}"
+        f"<a class='act resume' href='{_resume_link(id, at=t['uuid'])}'"
+        f" aria-label='resume here in a terminal' title='resume here in a terminal'>"
+        f"{PROMPT}</a></span></div>"
+        f"<div class=md>{_markdown(d['text'])}</div>{answer}"
     )
 
 
-def _tools_link(id: str, on: bool) -> str:
+def _tools_button(id: str, on: bool) -> str:
+    """One switch for the whole page, because it decides what the page weighs."""
     where = f"/session/{quote(id, safe=':')}" + ("" if on else "?tools=1")
-    return f"<p class=actions><a class='button{' on' if on else ''}' href='{where}'>tools</a></p>"
+    return (
+        f"<a class='act toggle{' on' if on else ''}' href='{where}'"
+        f" aria-label='show what was run' title='show what was run'>{CODE}</a>"
+    )
 
 
 def _tree(id: str, shape: topology.Topology) -> str:
@@ -264,8 +337,10 @@ def _tree(id: str, shape: topology.Topology) -> str:
 def _branch(id: str, segment: topology.Segment) -> str:
     """The label is styled, not the item: strikethrough on a list item reaches its children.
 
-    Each stretch links to picking the session up where that stretch ended, which
-    is the reason to be reading its shape at all.
+    Each stretch offers to pick the session up where that stretch ended, which
+    is the reason to be reading its shape at all — offered the way the turns
+    below and the rows of the index offer it, waiting to be hovered. The line
+    is wrapped so that hovering a nested stretch does not light up its parents.
     """
     classes = " ".join(
         c
@@ -278,40 +353,11 @@ def _branch(id: str, segment: topology.Segment) -> str:
         else ""
     )
     return (
-        f"<li><span class='{classes}'>{_h(display.describe(segment))}</span> "
-        f"<a class=point href='{_resume_link(id, at=segment.end)}'>"
-        f"{_h(display.point(segment.end))}</a>{below}"
-    )
-
-
-def _transcript(conn: sqlite3.Connection, id: str, params: dict[str, str]) -> Response:
-    session = query.get(conn, id)
-    if session is None:
-        return _error(404, f"No single session matches {id!r}.")
-    path = Path(session["path"])
-    if not path.exists():
-        return _error(404, f"{path} is gone. Sync the index.")
-
-    tools = params.get("tools") in ("1", "true")
-    whole = params.get("whole") in ("1", "true")
-    source = index.SOURCES[session["agent"]]
-    markdown = "".join(source.render(path, tools=tools, whole=whole))
-    return _page(
-        session["title"] or session["id"],
-        _controls(params, "recent") + _projects(conn),
-        f"<h1><a href='{_link(session['id'])}'>{_h(session['title'] or session['id'])}</a></h1>",
-        f"<p class=actions>{_toggle(session['id'], 'tools', tools, whole)}"
-        f"{_toggle(session['id'], 'whole', whole, tools)}</p>",
-        f"<pre class=transcript>{_h(markdown)}</pre>",
-    )
-
-
-def _toggle(id: str, name: str, on: bool, other: bool) -> str:
-    other_name = "whole" if name == "tools" else "tools"
-    wanted = {name: "0" if on else "1", other_name: "1" if other else "0"}
-    return (
-        f"<a class='button{' on' if on else ''}' "
-        f"href='/transcript/{quote(id, safe=':')}?{urlencode(wanted)}'>{name}</a> "
+        f"<li><span class=line><span class='{classes}'>{_h(display.describe(segment))}</span> "
+        f"<span class=point>{_h(display.point(segment.end))}</span>"
+        f"<a class='act resume' href='{_resume_link(id, at=segment.end)}'"
+        f" aria-label='resume where this ended' title='resume where this ended'>"
+        f"{PROMPT}</a></span>{below}"
     )
 
 
@@ -534,25 +580,49 @@ def _h(text: object) -> str:
     return html.escape("" if text is None else str(text))
 
 
+# Drawn rather than named, so the metadata line stays a metadata line. Stroked
+# in `currentColor` and sized in `em`, which is what keeps them in step with the
+# text beside them in either colour scheme.
+def _icon(*paths: str) -> str:
+    drawn = "".join(f"<path d='{d}'/>" for d in paths)
+    return (
+        "<svg viewBox='0 0 16 16' fill=none stroke=currentColor stroke-width=1.5"
+        f" stroke-linecap=round stroke-linejoin=round aria-hidden=true>{drawn}</svg>"
+    )
+
+
+CLIPBOARD = _icon("M5.5 1.8h5v2.4h-5z", "M10.5 3h2v11.2h-9V3h2")
+CLIPBOARD_ON = _icon(
+    "M5.5 1.8h5v2.4h-5z", "M10.5 3h2v11.2h-9V3h2", "M8 6.6v4.6", "M6 9.3 8 11.3l2-2"
+)
+PROMPT = _icon("M3.4 4.2 6.9 8l-3.5 3.8", "M8.6 11.8h4")
+CODE = _icon("M6 4.8 2.8 8 6 11.2", "M10 4.8 13.2 8 10 11.2")
+
+
 # The only script in the UI, and it moves nothing but text already on the page.
 # `writeText` needs a secure context, which `http://localhost` is and the address
 # `serve --lan` hands a phone is not, so the button says when it could not.
 COPY_JS = """<script>
 document.addEventListener('click', event => {
-  const button = event.target.closest('button.copy')
+  const button = event.target.closest('button[data-copy]')
   if (!button) return
   const turns = [...document.querySelectorAll('.turn')]
   const from = turns.indexOf(button.closest('.turn'))
   const wanted = button.dataset.copy === 'rest' ? turns.slice(from) : [turns[from]]
   // A turn off the live branch, or from before a compaction, carries nothing.
-  const carried = wanted.map(turn => turn.querySelector('.answer pre')).filter(Boolean)
-  const said = carried.map(pre => pre.textContent).join('\\n')
-  const label = button.textContent
+  const said = wanted.map(turn => turn.dataset.md).filter(Boolean).join('\\n')
   navigator.clipboard.writeText(said).then(
-    () => { button.textContent = 'copied' },
-    () => { button.textContent = 'no clipboard here' },
-  ).finally(() => setTimeout(() => { button.textContent = label }, 1200))
+    () => mark(button, 'copied'),
+    () => mark(button, 'no clipboard here'),
+  )
 })
+
+function mark(button, what) {
+  const said = button.title
+  button.title = what
+  button.classList.add('done')
+  setTimeout(() => { button.title = said; button.classList.remove('done') }, 1200)
+}
 </script>"""
 
 
@@ -620,18 +690,58 @@ tr:hover td .resume, td .resume:focus-visible { opacity: 1 }
 .point { color: var(--dim); font-size: 12px; font-family: ui-monospace, SFMono-Regular, monospace }
 .turns { list-style: none; padding: 0; margin: 0 }
 .turn { border-top: 1px solid var(--line); padding: 12px 0 }
-.turn .meta { color: var(--dim); font-size: 12px; margin-bottom: 4px }
-.turn .text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 22em; overflow: auto }
-.copy { border: 0; background: none; padding: 0; margin-left: 10px; cursor: pointer;
-        color: var(--accent); font: inherit; opacity: 0; transition: opacity .08s }
-.turn:hover .copy, .copy:focus-visible { opacity: 1 }
-.answer { margin-top: 6px }
+.turn .meta { color: var(--dim); font-size: 12px; margin-bottom: 4px;
+              display: flex; align-items: center; gap: 4px }
+.doing { margin-left: auto; display: flex; align-items: center; gap: 2px }
+
+/* Drawn, not written, and out of the way until the turn is being read — the
+   same bargain the resume links in a row of the index strike. */
+.act { display: inline-flex; padding: 3px; border: 0; background: none; border-radius: 5px;
+       color: var(--dim); cursor: pointer; opacity: 0; transition: opacity .08s, color .08s }
+.act svg { width: 1.25em; height: 1.25em }
+.turn:hover .act, .act:focus-visible, .act.done { opacity: 1 }
+.act:hover { color: var(--accent); background: color-mix(in oklab, var(--fg) 6%, transparent) }
+.act.done { color: var(--live) }
+.tree .line:hover .act, .tree .act:focus-visible { opacity: 1 }
+.tree .act { padding: 1px 3px }
+h2 .toggle { opacity: 1; margin-left: 8px; vertical-align: middle }
+h2 .toggle.on { color: var(--accent);
+                background: color-mix(in oklab, var(--accent) 14%, transparent) }
+
+.answer { margin-top: 2px }
 .answer summary { color: var(--dim); font-size: 12px; cursor: pointer; width: fit-content }
-.answer pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; margin: 6px 0 0;
-              font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-              max-height: 32em; overflow: auto }
-.transcript { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px;
-              font-family: ui-monospace, SFMono-Regular, Menlo, monospace }
+.answer[open] summary { margin-bottom: 6px }
+
+/* What the agent wrote, and what I asked, both read as they were written. The
+   ceiling is on the answer alone: a prompt is short and a turn is not. */
+.md { overflow-wrap: anywhere }
+.md > :first-child { margin-top: 0 }
+.md > :last-child { margin-bottom: 0 }
+.md h1, .md h2, .md h3, .md h4 { font-size: 1em; margin: 1em 0 .4em }
+.md p, .md ul, .md ol, .md blockquote, .md table { margin: .5em 0 }
+.md ul, .md ol { padding-left: 1.4em }
+.md li { margin: .15em 0 }
+.md code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em;
+           background: color-mix(in oklab, var(--fg) 7%, transparent);
+           padding: .1em .3em; border-radius: 4px }
+.md pre { background: color-mix(in oklab, var(--fg) 5%, transparent); padding: 9px 11px;
+          border-radius: 6px; overflow: auto }
+.md pre code { background: none; padding: 0; font-size: 13px }
+.md blockquote { margin-left: 0; padding-left: .9em; border-left: 2px solid var(--line);
+                 color: var(--dim) }
+.md table { border-collapse: collapse }
+.md th, .md td { border: 1px solid var(--line); padding: 4px 8px; text-align: left }
+.md hr { border: 0; border-top: 1px solid var(--line) }
+.answer .md { max-height: 40em; overflow: auto }
+
+.ran { margin: .6em 0 }
+.tool { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+        color: var(--dim) }
+.ran pre { background: color-mix(in oklab, var(--fg) 5%, transparent); padding: 8px 10px;
+           border-radius: 6px; margin: 3px 0 0; font-size: 12.5px; overflow: auto;
+           max-height: 18em; white-space: pre-wrap; overflow-wrap: anywhere;
+           font-family: ui-monospace, SFMono-Regular, Menlo, monospace }
+.ran pre.out.failed { color: var(--warn) }
 footer { margin-top: 40px; padding-top: 14px; border-top: 1px solid var(--line);
          color: var(--dim); font-size: 13px }
 
@@ -639,7 +749,7 @@ footer { margin-top: 40px; padding-top: 14px; border-top: 1px solid var(--line);
    Nothing hovers, so an action that waits to be hovered is an action that is
    never found. */
 @media (hover: none) {
-  td .resume, .copy { opacity: 1 }
+  td .resume, .act { opacity: 1 }
 }
 /* And no room for the columns that are only worth a glance. */
 @media (max-width: 640px) {

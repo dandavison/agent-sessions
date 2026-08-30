@@ -577,8 +577,10 @@ def test_an_answer_is_rendered_not_recited(indexed: Path) -> None:
 def test_what_an_agent_wrote_cannot_become_markup(indexed: Path, tmp_path: Path) -> None:
     """Tool output is read off this machine and rendered into a page I then open."""
     conn = db.connect()
-    path = Path(query.get(conn, ID)["path"])
+    found = query.get(conn, ID)
     conn.close()
+    assert found is not None
+    path = Path(found["path"])
     path.write_bytes(
         b"\n".join(
             orjson.dumps(r)
@@ -608,5 +610,5 @@ def test_the_buttons_are_icons_that_still_say_what_they_are(indexed: Path) -> No
 def test_a_turn_offers_to_be_resumed_from_where_the_row_does(indexed: Path) -> None:
     """The point stopped being the link; the action is the link, as in the index."""
     body = web.handle(f"/session/{ID}").body
-    assert f"class=resume href='/resume/{ID}@u1'" in body
+    assert f"resume' href='/resume/{ID}@u1'" in body
     assert "class=point href=" not in body

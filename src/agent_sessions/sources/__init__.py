@@ -27,19 +27,12 @@ class Source(Protocol):
         """Native id -> process, for whatever this agent is running right now."""
         ...
 
-    def render(self, path: Path, tools: bool, whole: bool) -> Iterator[str]:
-        """The transcript as markdown, straight from the file.
-
-        Not from the index, which holds no tool output: each agent knows how
-        its own transcript should read.
-        """
-        ...
-
     def render_blocks(self, chosen: list[Block], tools: bool) -> Iterator[str]:
-        """The same markdown, for any stretch of a conversation rather than all of it.
+        """A stretch of a conversation as markdown, straight from the file.
 
-        Asking for one turn is asking for fewer blocks, and it must read exactly
-        as that turn reads inside the whole.
+        Not from the index, which holds no tool output: each agent knows how its
+        own transcript should read. A turn must read exactly as it reads inside
+        the whole session, so both go through here.
         """
         ...
 
