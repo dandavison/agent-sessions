@@ -316,6 +316,9 @@ def _turn(id: str, t: dict, carried: Carried | None) -> str:
     or everything from one on, needs no second word with the server.
     """
     d = display.turn(t)
+    # Said only when it is worth saying. Nearly every one of these is mine; the
+    # exception is the summary a compaction leaves, and that is worth a word.
+    whose = f" · {_h(d['role'])}" if d["role"] != "user" else ""
     context = f" · <span class=num>{_h(d['context'])}</span>" if d["context"] else ""
     doing = (
         f"<button class=act data-copy=turn aria-label='copy this turn as markdown'"
@@ -334,7 +337,7 @@ def _turn(id: str, t: dict, carried: Carried | None) -> str:
     )
     source = f" data-md='{_h(carried.source)}'" if carried else ""
     return (
-        f"<li class=turn{source}><div class=meta>{_h(d['when'])} · {_h(d['role'])}{context}"
+        f"<li class=turn{source}><div class=meta>{_h(d['when'])}{whose}{context}"
         f" <span class=point>{_h(d['at'])}</span><span class=doing>{doing}"
         f"<a class='act resume' href='{_resume_link(id, at=t['uuid'])}'"
         f" aria-label='resume here in a terminal' title='resume here in a terminal'>"
