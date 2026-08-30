@@ -680,3 +680,16 @@ def test_a_stretch_that_is_not_mine_still_says_so(indexed: Path) -> None:
     conn.commit()
     conn.close()
     assert "summary" in web.handle(f"/session/{ID}").body
+
+
+def test_nothing_on_the_page_scrolls_inside_itself(indexed: Path) -> None:
+    """A fold that opens onto a scrollbar is a fold that has not opened."""
+    css = web.CSS
+    assert "max-height" not in css
+    assert "overflow: auto" not in css
+
+
+def test_a_turn_can_be_folded_from_the_keyboard(indexed: Path) -> None:
+    body = web.handle(f"/session/{ID}").body
+    assert "ArrowRight" in body
+    assert "ArrowLeft" in body
