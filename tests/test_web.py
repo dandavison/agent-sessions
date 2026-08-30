@@ -612,3 +612,33 @@ def test_a_turn_offers_to_be_resumed_from_where_the_row_does(indexed: Path) -> N
     body = web.handle(f"/session/{ID}").body
     assert f"resume' href='/resume/{ID}@u1'" in body
     assert "class=point href=" not in body
+
+
+def test_code_in_an_answer_is_highlighted(indexed: Path) -> None:
+    """A fenced block says what language it is; rendering it grey throws that away."""
+    body = web.handle(f"/session/{ID}").body
+    assert "<span class=" in body.split("<details class=answer>")[1]
+    assert ".hl" in body
+
+
+def test_what_a_tool_was_given_is_highlighted_too(indexed: Path) -> None:
+    """It is JSON, and it is the densest thing on the page when tools are on."""
+    assert "hl" in web.handle(f"/session/{ID}", "tools=1").body.split("class=ran")[1]
+
+
+def test_a_fence_in_no_language_is_still_shown(indexed: Path) -> None:
+    """Nothing is guessed: an unlabelled block is code, and it is not decorated."""
+    conn = db.connect()
+    found = query.get(conn, ID)
+    conn.close()
+    assert found is not None
+    Path(found["path"]).write_bytes(
+        b"\n".join(
+            orjson.dumps(r)
+            for r in [
+                user("u1", None, "show me"),
+                assistant("a1", "u1", [text_block("```\nplain text\n```")]),
+            ]
+        )
+    )
+    assert "plain text" in web.handle(f"/session/{ID}").body
