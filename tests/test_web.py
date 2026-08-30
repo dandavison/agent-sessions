@@ -667,3 +667,16 @@ def test_a_bare_url_in_an_answer_is_a_link(indexed: Path) -> None:
         )
     )
     assert '<a href="https://x.com/i/1"' in web.handle(f"/session/{ID}").body
+
+
+def test_a_turn_is_not_told_it_is_mine(indexed: Path) -> None:
+    """Six rows in the whole index are not mine. The word earned its place in none."""
+    assert "· user" not in web.handle(f"/session/{ID}").body
+
+
+def test_a_stretch_that_is_not_mine_still_says_so(indexed: Path) -> None:
+    conn = db.connect()
+    db.write_nodes(conn, [Node(ID, "s1", "a1", 2, "summary", 3, "what came before")])
+    conn.commit()
+    conn.close()
+    assert "summary" in web.handle(f"/session/{ID}").body
