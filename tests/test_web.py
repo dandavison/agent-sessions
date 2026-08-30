@@ -649,3 +649,21 @@ def test_nothing_is_labelled_in_words_beside_its_own_control(indexed: Path) -> N
     body = web.handle(f"/session/{ID}").body
     assert "<summary" in body
     assert ">answer<" not in body
+
+
+def test_a_bare_url_in_an_answer_is_a_link(indexed: Path) -> None:
+    """An agent writes them bare constantly, and a URL I cannot click is a URL I retype."""
+    conn = db.connect()
+    found = query.get(conn, ID)
+    conn.close()
+    assert found is not None
+    Path(found["path"]).write_bytes(
+        b"\n".join(
+            orjson.dumps(r)
+            for r in [
+                user("u1", None, "where is it"),
+                assistant("a1", "u1", [text_block("Writing the issue.\n\nhttps://x.com/i/1")]),
+            ]
+        )
+    )
+    assert '<a href="https://x.com/i/1"' in web.handle(f"/session/{ID}").body
