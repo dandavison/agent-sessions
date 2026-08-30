@@ -661,6 +661,48 @@ function mark(button, what) {
   button.classList.add('done')
   setTimeout(() => { button.title = said; button.classList.remove('done') }, 1200)
 }
+
+// One turn is current, the way one line is current in an editor. j and k move
+// it; left and right fold and unfold it. Up and down are left alone, because
+// they are how the page is scrolled and taking them costs more than it gives.
+const turns = () => [...document.querySelectorAll('.turn')]
+let at = 0
+
+function current(next) {
+  const all = turns()
+  if (!all.length) return null
+  at = Math.max(0, Math.min(next === undefined ? at : next, all.length - 1))
+  all.forEach((turn, i) => turn.classList.toggle('current', i === at))
+  return all[at]
+}
+
+function fold(turn, open) {
+  const answer = turn.querySelector('.answer')
+  if (answer) answer.open = open
+}
+
+document.addEventListener('keydown', event => {
+  if (event.metaKey || event.ctrlKey || event.altKey) return
+  // Typing in the search box is typing, not driving.
+  if (event.target.closest('input, textarea, [contenteditable]')) return
+  const moved = { j: 1, k: -1 }[event.key]
+  const folding = { ArrowRight: true, ArrowLeft: false }[event.key]
+  if (moved === undefined && folding === undefined) return
+  event.preventDefault()
+  const turn = current(moved === undefined ? undefined : at + moved)
+  if (!turn) return
+  if (folding !== undefined) fold(turn, folding)
+  turn.scrollIntoView({ block: 'nearest' })
+})
+
+// Clicking anywhere in a turn makes it the current one, so the keyboard picks
+// up where the mouse left off rather than somewhere else.
+document.addEventListener('click', event => {
+  const turn = event.target.closest('.turn')
+  if (turn) current(turns().indexOf(turn))
+})
+
+current(0)
 </script>"""
 
 
@@ -727,7 +769,11 @@ tr:hover td .resume, td .resume:focus-visible { opacity: 1 }
 .tree .abandoned { color: var(--dim); text-decoration: line-through }
 .point { color: var(--dim); font-size: 12px; font-family: ui-monospace, SFMono-Regular, monospace }
 .turns { list-style: none; padding: 0; margin: 0 }
-.turn { border-top: 1px solid var(--line); padding: 12px 0 }
+.turn { border-top: 1px solid var(--line); padding: 12px 0 12px 10px;
+        border-left: 2px solid transparent }
+/* Which one the keyboard is on. A rule down the margin, not a highlight: the
+   answer beside it is what is being read. */
+.turn.current { border-left-color: var(--accent) }
 .turn .meta { color: var(--dim); font-size: 12px; margin-bottom: 4px;
               display: flex; align-items: center; gap: 4px }
 .doing { margin-left: auto; display: flex; align-items: center; gap: 2px }
@@ -757,8 +803,10 @@ h2 .toggle.on { color: var(--accent);
 .answer[open] summary { margin-bottom: 4px }
 .answer[open] summary svg { rotate: 90deg }
 
-/* What the agent wrote, and what I asked, both read as they were written. The
-   ceiling is on the answer alone: a prompt is short and a turn is not. */
+/* Nothing here is given a height of its own. A box that scrolls inside a page
+   that scrolls is two things to drive instead of one, and a fold that opens
+   onto a scrollbar has not opened. Long lines wrap rather than run off, which
+   is the same bargain and the only one that keeps a wide block on the page. */
 .md { overflow-wrap: anywhere }
 .md > :first-child { margin-top: 0 }
 .md > :last-child { margin-bottom: 0 }
@@ -770,21 +818,20 @@ h2 .toggle.on { color: var(--accent);
            background: color-mix(in oklab, var(--fg) 7%, transparent);
            padding: .1em .3em; border-radius: 4px }
 .md pre { background: color-mix(in oklab, var(--fg) 5%, transparent); padding: 9px 11px;
-          border-radius: 6px; overflow: auto }
+          border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere }
 .md pre code { background: none; padding: 0; font-size: 13px }
 .md blockquote { margin-left: 0; padding-left: .9em; border-left: 2px solid var(--line);
                  color: var(--dim) }
 .md table { border-collapse: collapse }
 .md th, .md td { border: 1px solid var(--line); padding: 4px 8px; text-align: left }
 .md hr { border: 0; border-top: 1px solid var(--line) }
-.answer .md { max-height: 40em; overflow: auto }
 
 .ran { margin: .6em 0 }
 .tool { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
         color: var(--dim) }
 .ran pre { background: color-mix(in oklab, var(--fg) 5%, transparent); padding: 8px 10px;
-           border-radius: 6px; margin: 3px 0 0; font-size: 12.5px; overflow: auto;
-           max-height: 18em; white-space: pre-wrap; overflow-wrap: anywhere;
+           border-radius: 6px; margin: 3px 0 0; font-size: 12.5px;
+           white-space: pre-wrap; overflow-wrap: anywhere;
            font-family: ui-monospace, SFMono-Regular, Menlo, monospace }
 .ran pre.out.failed { color: var(--warn) }
 footer { margin-top: 40px; padding-top: 14px; border-top: 1px solid var(--line);
