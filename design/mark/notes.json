@@ -1,0 +1,9 @@
+{
+  "chosen": "What shipped: the plane held open on the session being looked at, one more behind it. Drawn by the app itself, so this file is a copy of what it draws.",
+  "pupil": "The same, with the lit thing round rather than square to the planes.",
+  "lit": "Three planes, the current one lit and solid, the others as their front edges.",
+  "two": "Two planes only, at the largest geometry that fits — the most weight per pixel.",
+  "layers": "The same as `lit` but inked, for comparison: no accent anywhere.",
+  "bars": "Three planes flattened, with real gaps between them: depth as three strata.",
+  "edges": "No solid at all: three receding edges, the nearest one lit."
+}

@@ -1,0 +1,90 @@
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
+"""Build the logo from the mark the app itself draws, so the two cannot drift.
+
+Writes the lockup as SVG, which follows the reader's colour scheme, and as PNG
+for the places that will not run a stylesheet — one raster per scheme, since a
+PNG cannot follow anything.
+"""
+
+import pathlib
+import re
+import subprocess
+import sys
+import tempfile
+
+HERE = pathlib.Path(__file__).parent
+sys.path.insert(0, str(HERE.parent / "src"))
+
+from agent_sessions.mark import MARK  # noqa: E402 — found by the path set above
+
+CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+SCALE = 3
+WIDTH, HEIGHT = 228, 40
+DARK = {"#1c1c1e": "#e8e8ea", "#0a58ca": "#79a9ff", "#b6b7bf": "#6b6f79"}
+
+
+def main() -> None:
+    lockup = logo()
+    (HERE / "logo.svg").write_text(lockup)
+    (HERE / "mark" / "chosen.svg").write_text(MARK + "\n")
+    raster(lockup, HERE / "logo.png")
+    raster(recolour(lockup), HERE / "logo-dark.png")
+    for path in ("logo.svg", "logo.png", "logo-dark.png", "mark/chosen.svg"):
+        print(HERE / path)
+
+
+def logo() -> str:
+    """The mark, and the name set beside it in the face the page sets it in."""
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {WIDTH} {HEIGHT}"
+     width="{WIDTH}" height="{HEIGHT}" role="img" aria-label="agent-sessions">
+{nested(MARK, x=0, y=1, size=38)}
+<text x="50" y="28" fill="var(--ink)" font-size="24" font-weight="600"
+      letter-spacing="-.3" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif"
+      >agent-sessions</text>
+</svg>
+"""
+
+
+def nested(mark: str, x: int, y: int, size: int) -> str:
+    """The mark, placed. Its own `<svg>` becomes an inner one, which is legal."""
+    inner = mark.split(">", 1)[1].rsplit("</svg>", 1)[0]
+    return f'<svg x="{x}" y="{y}" width="{size}" height="{size}" viewBox="0 0 32 32">{inner}</svg>'
+
+
+def recolour(svg: str) -> str:
+    """The dark scheme, applied rather than declared, for a raster that cannot ask."""
+    for light, dark in DARK.items():
+        svg = re.sub(rf"{light}(?![0-9a-f])", dark, svg, flags=re.IGNORECASE)
+    return svg
+
+
+def raster(svg: str, out: pathlib.Path) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        page = pathlib.Path(tmp) / "page.html"
+        page.write_text(
+            f'<style>html,body{{margin:0}}svg{{display:block;width:{WIDTH * SCALE}px;'
+            f"height:{HEIGHT * SCALE}px}}</style>{svg}"
+        )
+        subprocess.run(
+            [
+                CHROME,
+                "--headless",
+                "--disable-gpu",
+                "--hide-scrollbars",
+                "--default-background-color=00000000",
+                f"--window-size={WIDTH * SCALE},{HEIGHT * SCALE}",
+                f"--screenshot={out}",
+                str(page),
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+
+if __name__ == "__main__":
+    main()

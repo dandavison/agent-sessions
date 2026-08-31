@@ -4,40 +4,36 @@
 # requires-python = ">=3.12"
 # dependencies = []
 # ///
-"""Render index.html: every candidate mark, at every size, over both palettes."""
+"""Render each set's index.html: every mark in it, at every size, over both palettes.
 
+A set is a directory of .svg files beside a notes.json naming and describing them,
+in the order they should be shown.
+"""
+
+import json
 import pathlib
 import re
+import sys
 
 HERE = pathlib.Path(__file__).parent
-
-NOTES = {
-    "portal": "Planes receding: the page you are on, the sessions behind it, the one lit at the bottom.",
-    "strata": "A window onto conversation that runs past its edges — you see part of a larger world.",
-    "aperture": "An iris: an instrument for looking, held open on something.",
-    "horizon": "A round port; the strata pass behind it, unbounded by it.",
-    "fork": "A session and the branch taken out of it — the topology `tree` draws.",
-    "thread": "One conversation as one line, turning back on itself, still going.",
-    "stack": "Sessions as planes seen edge-on, the current one lit.",
-    "dialogue": "Turns, alternating: what was asked, what came back.",
-    "brackets": "Code held open around the moment inside it.",
-    "cursor": "A window with writing in it, still going.",
-}
-ORDER = list(NOTES)
 SIZES = (16, 20, 32, 64, 128)
 
 
-def main() -> None:
-    sections = "".join(section(name) for name in ORDER)
-    (HERE / "index.html").write_text(PAGE.format(sections=sections))
+def main(argv: list[str]) -> None:
+    sets = [HERE / a for a in argv] or [p.parent for p in HERE.glob("*/notes.json")]
+    for directory in sorted(sets):
+        notes = json.loads((directory / "notes.json").read_text())
+        sections = "".join(section(directory, name, note) for name, note in notes.items())
+        (directory / "index.html").write_text(PAGE.format(set=directory.name, sections=sections))
+        print(directory / "index.html")
 
 
-def section(name: str) -> str:
-    src = re.sub(r"\s+", " ", (HERE / f"{name}.svg").read_text()).strip()
+def section(directory: pathlib.Path, name: str, note: str) -> str:
+    src = re.sub(r"\s+", " ", (directory / f"{name}.svg").read_text()).strip()
     return f"""
 <section>
   <h2>{name}</h2>
-  <p>{NOTES[name]}</p>
+  <p>{note}</p>
   <div class="panes">
     <div class="pane light">{sizes(name, src, "l")}</div>
     <div class="pane dark">{sizes(name, src, "d")}</div>
@@ -72,7 +68,7 @@ def unique_ids(src: str, suffix: str) -> str:
 
 PAGE = """<!doctype html>
 <meta charset="utf-8">
-<title>agent-sessions — favicon candidates</title>
+<title>agent-sessions — {set}</title>
 <style>
 :root {{ color-scheme: light dark; --fg:#1c1c1e; --bg:#fdfdfd; --dim:#6b6b70; --line:#e2e2e5; }}
 @media (prefers-color-scheme: dark) {{
@@ -95,8 +91,8 @@ section > p {{ margin:0 0 14px; max-width:62ch }}
 .box svg {{ width:100%; height:100%; display:block }}
 .light {{ background:#fdfdfd }}
 .dark  {{ background:#16171a }}
-.light svg {{ --ink:#1c1c1e; --accent:#0a58ca; --dim:#c3c3ca }}
-.dark  svg {{ --ink:#e8e8ea; --accent:#79a9ff; --dim:#44464d }}
+.light svg {{ --ink:#1c1c1e; --accent:#0a58ca; --dim:#b6b7bf; --behind:#b6b7bf }}
+.dark  svg {{ --ink:#e8e8ea; --accent:#79a9ff; --dim:#6b6f79; --behind:#6b6f79 }}
 .tabstrip {{ display:flex; gap:2px; padding:8px 8px 0; border-radius:8px; border:1px solid var(--line) }}
 .tab {{ display:flex; align-items:center; gap:7px; padding:7px 12px;
   border-radius:7px 7px 0 0; font-size:12px; white-space:nowrap }}
@@ -105,7 +101,7 @@ section > p {{ margin:0 0 14px; max-width:62ch }}
 .tab.off {{ background:none; opacity:.55 }}
 </style>
 <main>
-<h1>agent-sessions — favicon candidates</h1>
+<h1>agent-sessions — {set}</h1>
 <p class="lede">Each mark at 16, 20, 32, 64 and 128px, over both palettes, and in a tab strip. The
 tab-strip copies are the real <code>.svg</code> files as a browser loads them, so those follow your
 OS theme rather than the panel they sit in.</p>
@@ -114,4 +110,4 @@ OS theme rather than the panel they sit in.</p>
 """
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

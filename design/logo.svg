@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 228 40"
+     width="228" height="40" role="img" aria-label="agent-sessions">
+<svg x="0" y="1" width="38" height="38" viewBox="0 0 32 32">
+<style>
+  svg { --ink: #1c1c1e; --accent: #0a58ca; --behind: #b6b7bf }
+  @media (prefers-color-scheme: dark) {
+    svg { --ink: #e8e8ea; --accent: #79a9ff; --behind: #6b6f79 }
+  }
+</style>
+<path fill="none" stroke="var(--ink)" stroke-width="3.6" stroke-linejoin="round"
+      d="M4 12.4 16 6l12 6.4L16 18.8Z"/>
+<path fill="var(--accent)" d="M9.8 12.4 16 9.2l6.2 3.2L16 15.6Z"/>
+<path fill="none" stroke="var(--behind)" stroke-width="3.4" stroke-linecap="round"
+      stroke-linejoin="round" d="M4 20.8 16 27.2l12-6.4"/>
+</svg>
+<text x="50" y="28" fill="var(--ink)" font-size="24" font-weight="600"
+      letter-spacing="-.3" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif"
+      >agent-sessions</text>
+</svg>
