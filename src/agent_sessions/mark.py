@@ -1,0 +1,22 @@
+"""The mark, in one place: the page draws it, `/favicon.svg` serves it, and the
+logo in `design/` is built from it.
+
+Sessions as planes seen edge-on, the nearest one held open on the one being
+looked at. It carries its own palette rather than taking the page's, because it
+is also served on its own, where there is no page to take a colour from. The
+values are the page's, so the two agree.
+"""
+
+MARK = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" aria-hidden="true">
+<style>
+  svg { --ink: #1c1c1e; --accent: #0a58ca; --behind: #b6b7bf }
+  @media (prefers-color-scheme: dark) {
+    svg { --ink: #e8e8ea; --accent: #79a9ff; --behind: #6b6f79 }
+  }
+</style>
+<path fill="none" stroke="var(--ink)" stroke-width="3.6" stroke-linejoin="round"
+      d="M4 12.4 16 6l12 6.4L16 18.8Z"/>
+<path fill="var(--accent)" d="M9.8 12.4 16 9.2l6.2 3.2L16 15.6Z"/>
+<path fill="none" stroke="var(--behind)" stroke-width="3.4" stroke-linecap="round"
+      stroke-linejoin="round" d="M4 20.8 16 27.2l12-6.4"/>
+</svg>"""

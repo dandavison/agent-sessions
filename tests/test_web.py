@@ -6,6 +6,7 @@ socket underneath it is plumbing and has nothing to decide.
 
 import html
 from pathlib import Path
+from xml.etree import ElementTree
 
 import orjson
 import pytest
@@ -699,3 +700,23 @@ def test_the_current_turn_moves_on_the_arrows_too(indexed: Path) -> None:
     body = web.handle(f"/session/{ID}").body
     assert "ArrowDown" in body
     assert "ArrowUp" in body
+
+
+# --- the mark ---------------------------------------------------------------
+
+
+def test_the_tab_gets_the_mark(indexed: Path) -> None:
+    assert "<link rel=icon href=/favicon.svg>" in web.handle("/").body
+    icon = web.handle("/favicon.svg")
+    assert icon.content_type == "image/svg+xml"
+    assert icon.body.startswith("<svg")
+
+
+def test_the_mark_is_drawn_for_either_colour_scheme(indexed: Path) -> None:
+    """It is served on its own, where there is no page to take a colour from."""
+    assert "prefers-color-scheme: dark" in web.handle("/favicon.svg").body
+
+
+def test_the_mark_survives_being_served_on_its_own(indexed: Path) -> None:
+    """Served as image/svg+xml it is parsed as XML, where HTML's laxity is gone."""
+    ElementTree.fromstring(web.handle("/favicon.svg").body)

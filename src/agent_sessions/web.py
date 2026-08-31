@@ -38,6 +38,7 @@ from agent_sessions import (
     resume,
     topology,
 )
+from agent_sessions.mark import MARK
 from agent_sessions.models import Block, Boundary, Ran, Said
 from agent_sessions.wormhole import WormholeUnavailable
 
@@ -64,6 +65,8 @@ def handle(path: str, query_string: str = "") -> Response:
             return _sessions(conn, params)
         if path == "/sync":
             return _sync(conn)
+        if path == "/favicon.svg":
+            return Response(MARK, content_type="image/svg+xml")
         if id := _tail(path, "/resume/"):
             return _resume(conn, id, remote=params.get("remote") in ("1", "true"))
         if id := _tail(path, "/issue/"):
@@ -466,6 +469,7 @@ def _page(title: str, *sections: str, status: int = 200) -> Response:
     return Response(
         f"<!doctype html><html lang=en><head><meta charset=utf-8>"
         f"<meta name=viewport content='width=device-width, initial-scale=1'>"
+        f"<link rel=icon href=/favicon.svg>"
         f"<title>{_h(title)}</title><style>{CSS}</style></head>"
         f"<body><main>{body}</main></body></html>",
         status=status,
@@ -487,7 +491,7 @@ def _controls(params: dict[str, str], sort: str) -> str:
     )
     return (
         "<form class=controls action=/ method=get>"
-        "<a class=brand href=/>agent-sessions</a>"
+        f"<a class=brand href=/>{MARK}agent-sessions</a>"
         f"<input name=q placeholder='what was said' value='{_h(params.get('q', ''))}'>"
         f"<input name=project placeholder=project list=projects"
         f" value='{_h(params.get('project', ''))}'>"
@@ -725,7 +729,10 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: v
      margin: 32px 0 8px; font-weight: 600 }
 .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
             padding: 14px 0; border-bottom: 1px solid var(--line); margin-bottom: 4px }
-.brand { font-weight: 600; color: var(--fg); margin-right: 8px }
+.brand { font-weight: 600; color: var(--fg); margin-right: 8px;
+         display: inline-flex; align-items: center; gap: 7px }
+.brand svg { width: 19px; height: 19px }
+.brand:hover { text-decoration: none }
 input, select, button { font: inherit; padding: 5px 8px; border: 1px solid var(--line);
                         border-radius: 6px; background: var(--bg); color: var(--fg) }
 input[name=q] { flex: 1; min-width: 180px }
