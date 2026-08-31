@@ -662,9 +662,10 @@ function mark(button, what) {
   setTimeout(() => { button.title = said; button.classList.remove('done') }, 1200)
 }
 
-// One turn is current, the way one line is current in an editor. j and k move
-// it; left and right fold and unfold it. Up and down are left alone, because
-// they are how the page is scrolled and taking them costs more than it gives.
+// One turn is current, the way one line is current in an editor. Up and down,
+// or j and k, move it; left and right fold and unfold it. The arrows no longer
+// scroll the page here — the wheel, space and the page keys still do, and a
+// page with a cursor on it should not answer the arrows with something else.
 const turns = () => [...document.querySelectorAll('.turn')]
 let at = 0
 
@@ -685,7 +686,7 @@ document.addEventListener('keydown', event => {
   if (event.metaKey || event.ctrlKey || event.altKey) return
   // Typing in the search box is typing, not driving.
   if (event.target.closest('input, textarea, [contenteditable]')) return
-  const moved = { j: 1, k: -1 }[event.key]
+  const moved = { j: 1, k: -1, ArrowDown: 1, ArrowUp: -1 }[event.key]
   const folding = { ArrowRight: true, ArrowLeft: false }[event.key]
   if (moved === undefined && folding === undefined) return
   event.preventDefault()

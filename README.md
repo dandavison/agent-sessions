@@ -46,10 +46,11 @@ some thirty times the weight of the prose around it. Turns from before a
 compaction, or off the branch that stayed live, carry nothing and so offer
 nothing.
 
-One turn is current, the way one line is current in an editor: `j` and `k`
-move it, and left and right fold and unfold it. Up and down are left alone,
-being how the page is scrolled. Nothing on the page is given a height of its
-own — a box that scrolls inside a page that scrolls is two things to drive
+One turn is current, the way one line is current in an editor: up and down —
+or `j` and `k` — move it, and left and right fold and unfold it. The arrows
+do not scroll this page; the wheel, space and the page keys still do, and a
+page with a cursor on it should not answer the arrows with something else.
+Nothing on the page is given a height of its own — a box that scrolls inside a page that scrolls is two things to drive
 instead of one, and a fold that opens onto a scrollbar has not opened.
 
 Copying wants a secure context, which `http://localhost` is and the address
