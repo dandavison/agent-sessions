@@ -693,3 +693,9 @@ def test_a_turn_can_be_folded_from_the_keyboard(indexed: Path) -> None:
     body = web.handle(f"/session/{ID}").body
     assert "ArrowRight" in body
     assert "ArrowLeft" in body
+
+
+def test_the_current_turn_moves_on_the_arrows_too(indexed: Path) -> None:
+    body = web.handle(f"/session/{ID}").body
+    assert "ArrowDown" in body
+    assert "ArrowUp" in body
