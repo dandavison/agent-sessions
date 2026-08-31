@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+<style>
+  svg{--ink:#1c1c1e;--accent:#0a58ca;--dim:#c3c3ca}
+  @media (prefers-color-scheme:dark){svg{--ink:#e8e8ea;--accent:#79a9ff;--dim:#44464d}}
+  .ink{stroke:var(--ink);fill:none;stroke-linecap:round;stroke-linejoin:round}
+  .inkf{fill:var(--ink)}
+  .acc{stroke:var(--accent);fill:none;stroke-linecap:round;stroke-linejoin:round}
+  .accf{fill:var(--accent)}
+  .dim{stroke:var(--dim);fill:none;stroke-linecap:round;stroke-linejoin:round}
+  .dimf{fill:var(--dim)}
+</style>
+<path class="inkf" d="M15.29 9.24 L9.79 18.77 L3.94 21.37 A13.2 13.2 0 0 1 14.62 2.87 Z"/>
+<path class="inkf" d="M10.50 20.00 L21.50 20.00 L26.68 23.76 A13.2 13.2 0 0 1 5.32 23.76 Z"/>
+<path class="inkf" d="M22.21 18.77 L16.71 9.24 L17.38 2.87 A13.2 13.2 0 0 1 28.06 21.37 Z"/>
+<circle class="accf" cx="16" cy="16" r="2.6"/>
+</svg>

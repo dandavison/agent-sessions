@@ -1,0 +1,117 @@
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
+"""Render index.html: every candidate mark, at every size, over both palettes."""
+
+import pathlib
+import re
+
+HERE = pathlib.Path(__file__).parent
+
+NOTES = {
+    "portal": "Planes receding: the page you are on, the sessions behind it, the one lit at the bottom.",
+    "strata": "A window onto conversation that runs past its edges — you see part of a larger world.",
+    "aperture": "An iris: an instrument for looking, held open on something.",
+    "horizon": "A round port; the strata pass behind it, unbounded by it.",
+    "fork": "A session and the branch taken out of it — the topology `tree` draws.",
+    "thread": "One conversation as one line, turning back on itself, still going.",
+    "stack": "Sessions as planes seen edge-on, the current one lit.",
+    "dialogue": "Turns, alternating: what was asked, what came back.",
+    "brackets": "Code held open around the moment inside it.",
+    "cursor": "A window with writing in it, still going.",
+}
+ORDER = list(NOTES)
+SIZES = (16, 20, 32, 64, 128)
+
+
+def main() -> None:
+    sections = "".join(section(name) for name in ORDER)
+    (HERE / "index.html").write_text(PAGE.format(sections=sections))
+
+
+def section(name: str) -> str:
+    src = re.sub(r"\s+", " ", (HERE / f"{name}.svg").read_text()).strip()
+    return f"""
+<section>
+  <h2>{name}</h2>
+  <p>{NOTES[name]}</p>
+  <div class="panes">
+    <div class="pane light">{sizes(name, src, "l")}</div>
+    <div class="pane dark">{sizes(name, src, "d")}</div>
+  </div>
+  <div class="tabs">{tabstrip(name, "light")}{tabstrip(name, "dark")}</div>
+</section>"""
+
+
+def sizes(name: str, src: str, theme: str) -> str:
+    return "".join(
+        f'<div class="s"><div class="box" style="width:{n}px;height:{n}px">'
+        f'{unique_ids(src, f"{name}{theme}{n}")}</div><span>{n}</span></div>'
+        for n in SIZES
+    )
+
+
+def tabstrip(name: str, theme: str) -> str:
+    tab = f'<img src="{name}.svg" width="16" height="16">'
+    return (
+        f'<div class="tabstrip {theme}">'
+        f'<div class="tab">{tab}<span>agent-sessions</span></div>'
+        f'<div class="tab off">{tab}<span>claude:7e90a7c6</span></div></div>'
+    )
+
+
+def unique_ids(src: str, suffix: str) -> str:
+    """The same markup appears many times on the page; its ids must not collide."""
+    for i in re.findall(r'id="([^"]+)"', src):
+        src = src.replace(f'id="{i}"', f'id="{i}{suffix}"').replace(f"url(#{i})", f"url(#{i}{suffix})")
+    return src
+
+
+PAGE = """<!doctype html>
+<meta charset="utf-8">
+<title>agent-sessions — favicon candidates</title>
+<style>
+:root {{ color-scheme: light dark; --fg:#1c1c1e; --bg:#fdfdfd; --dim:#6b6b70; --line:#e2e2e5; }}
+@media (prefers-color-scheme: dark) {{
+  :root {{ --fg:#e8e8ea; --bg:#16171a; --dim:#9a9aa1; --line:#2c2e33; }}
+}}
+body {{ margin:0; background:var(--bg); color:var(--fg);
+  font:14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif }}
+main {{ max-width:1040px; margin:0 auto; padding:32px 20px 80px }}
+h1 {{ font-size:19px; margin:0 0 4px }}
+.lede {{ color:var(--dim); margin:0 0 28px; max-width:70ch }}
+section {{ border-top:1px solid var(--line); padding:20px 0 }}
+h2 {{ font-size:12px; text-transform:uppercase; letter-spacing:.09em; color:var(--dim); margin:0 0 3px }}
+section > p {{ margin:0 0 14px; max-width:62ch }}
+.panes, .tabs {{ display:grid; grid-template-columns:1fr 1fr; gap:12px }}
+.tabs {{ margin-top:12px }}
+.pane {{ display:flex; align-items:flex-end; gap:22px; padding:18px 20px;
+  border-radius:8px; border:1px solid var(--line) }}
+.s {{ display:flex; flex-direction:column; align-items:center; gap:7px }}
+.s span {{ font-size:10px; color:#8a8a90; font-variant-numeric:tabular-nums }}
+.box svg {{ width:100%; height:100%; display:block }}
+.light {{ background:#fdfdfd }}
+.dark  {{ background:#16171a }}
+.light svg {{ --ink:#1c1c1e; --accent:#0a58ca; --dim:#c3c3ca }}
+.dark  svg {{ --ink:#e8e8ea; --accent:#79a9ff; --dim:#44464d }}
+.tabstrip {{ display:flex; gap:2px; padding:8px 8px 0; border-radius:8px; border:1px solid var(--line) }}
+.tab {{ display:flex; align-items:center; gap:7px; padding:7px 12px;
+  border-radius:7px 7px 0 0; font-size:12px; white-space:nowrap }}
+.light .tab {{ background:#ececef; color:#1c1c1e }}
+.dark  .tab {{ background:#26282d; color:#e8e8ea }}
+.tab.off {{ background:none; opacity:.55 }}
+</style>
+<main>
+<h1>agent-sessions — favicon candidates</h1>
+<p class="lede">Each mark at 16, 20, 32, 64 and 128px, over both palettes, and in a tab strip. The
+tab-strip copies are the real <code>.svg</code> files as a browser loads them, so those follow your
+OS theme rather than the panel they sit in.</p>
+{sections}
+</main>
+"""
+
+if __name__ == "__main__":
+    main()

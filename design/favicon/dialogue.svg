@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+<style>
+  svg{--ink:#1c1c1e;--accent:#0a58ca;--dim:#c3c3ca}
+  @media (prefers-color-scheme:dark){svg{--ink:#e8e8ea;--accent:#79a9ff;--dim:#44464d}}
+  .ink{stroke:var(--ink);fill:none;stroke-linecap:round;stroke-linejoin:round}
+  .inkf{fill:var(--ink)}
+  .acc{stroke:var(--accent);fill:none;stroke-linecap:round;stroke-linejoin:round}
+  .accf{fill:var(--accent)}
+  .dim{stroke:var(--dim);fill:none;stroke-linecap:round;stroke-linejoin:round}
+  .dimf{fill:var(--dim)}
+</style>
+<g stroke-width="3.2" stroke-linecap="round">
+  <path class="ink" d="M6 7.5 H15"/>
+  <path class="dim" d="M6 14 H26"/>
+  <path class="acc" d="M6 20.5 H13"/>
+  <path class="dim" d="M6 27 H22"/>
+</g>
+</svg>
