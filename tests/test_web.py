@@ -361,6 +361,46 @@ def test_a_lost_branch_does_not_strike_out_what_came_after_it(
     assert body.index("</span>", lost) < body.index("<ul>", lost)
 
 
+# --- a turn that is mostly something pasted --------------------------------
+
+
+def said(path: Path, uuid: str, text: str) -> None:
+    conn = db.connect(path)
+    db.write_nodes(conn, [Node(ID, uuid, "a2", 2, "user", 3, text)])
+    conn.commit()
+    conn.close()
+
+
+def test_a_wall_of_pasted_text_is_folded_rather_than_printed(indexed: Path) -> None:
+    """Most of a turn is sometimes what I pasted into it, and pages read as it.
+
+    Nothing in the transcript says a turn was pasted into — the text arrives
+    inlined, and only Claude's own prompt history keeps the placeholder — so
+    length is all there is to go on. What was said stays on the page and the
+    rest waits behind a fold, as an answer does.
+    """
+    said(indexed, "u2", "here is the log\n" + "\n".join(f"line {i}" for i in range(400)))
+    body = web.handle(f"/session/{ID}").body
+    assert "here is the log" in body
+    assert body.index("line 0") < body.index("class=rest") < body.index("line 399")
+
+
+def test_the_fold_says_how_much_is_under_it(indexed: Path) -> None:
+    said(indexed, "u2", "\n".join(f"line {i}" for i in range(400)))
+    assert "375 lines" in web.handle(f"/session/{ID}").body
+
+
+def test_a_turn_worth_reading_is_not_folded(indexed: Path) -> None:
+    said(indexed, "u2", "why is conform relocating worktrees")
+    assert "class=rest" not in web.handle(f"/session/{ID}").body
+
+
+def test_one_long_line_is_folded_too(indexed: Path) -> None:
+    """A blob pasted as a single line is a wall of text like any other."""
+    said(indexed, "u2", "here is the json " + "x" * 8_000)
+    assert "class=rest" in web.handle(f"/session/{ID}").body
+
+
 # --- markup ----------------------------------------------------------------
 
 
