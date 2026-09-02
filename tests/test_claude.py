@@ -416,6 +416,16 @@ def test_a_point_is_resumed_by_writing_a_session_that_ends_there(tmp_path: Path)
     assert [r["uuid"] for r in records] == ["u1", "a1"]
 
 
+def test_a_prompt_is_resumed_after_the_answer_to_it(tmp_path: Path) -> None:
+    """A point names an exchange, not a record: picking one up carries the answer.
+
+    Ending at the prompt hands back a session sitting on a question nobody
+    answered, which is not the state it was ever in.
+    """
+    _, records = forked_at(tmp_path, branched(), "u2")
+    assert [r["uuid"] for r in records] == ["u1", "a1", "u2", "a2"]
+
+
 def test_the_branch_the_point_is_on_is_the_one_kept(tmp_path: Path) -> None:
     _, records = forked_at(tmp_path, branched(), "a2")
     assert [r["uuid"] for r in records] == ["u1", "a1", "u2", "a2"]
@@ -770,6 +780,47 @@ def test_the_tip_is_still_on_the_branch_the_leaf_names() -> None:
         last_prompt("a1"),
     ]
     assert "abandoned" not in [b.text for b in blocks(records, tip=True) if isinstance(b, Said)]
+
+
+def test_the_tip_follows_a_branch_opened_after_the_leaf_was_recorded() -> None:
+    """A prompt can land beside the leaf rather than below it, and be the live one.
+
+    The leaf names a branch as of when it was written. Records appended after
+    it are newer than anything it knows, so a thread that leaves its branch
+    takes the thread with it — otherwise the session reads as the one it was
+    rewound off, missing every turn since.
+    """
+    records = [
+        user("u1", None, "kept"),
+        assistant("a1", "u1", [text_block("kept answer")], "req_1"),
+        user("u2", "a1", "asked"),
+        assistant("a2", "u2", [text_block("abandoned answer")], "req_2"),
+        last_prompt("a2"),
+        user("u3", "a1", "asked again instead"),
+        assistant("a3", "u3", [text_block("the live answer")], "req_3"),
+    ]
+    said = [b.text for b in blocks(records, tip=True) if isinstance(b, Said)]
+    assert "the live answer" in said
+    assert "abandoned answer" not in said
+
+
+def test_the_tip_stops_at_a_leaf_recorded_after_the_records_below_it() -> None:
+    """Rewinding writes the leaf last, naming a point the file already went past.
+
+    Following children down from it would walk straight back into what was
+    rewound over.
+    """
+    records = [
+        user("u1", None, "kept"),
+        assistant("a1", "u1", [text_block("kept answer")], "req_1"),
+        user("u2", "a1", "rewound over"),
+        assistant("a2", "u2", [text_block("rewound over answer")], "req_2"),
+        last_prompt("a2"),
+        last_prompt("a1"),
+    ]
+    said = [b.text for b in blocks(records, tip=True) if isinstance(b, Said)]
+    assert "kept answer" in said
+    assert "rewound over answer" not in said
 
 
 def test_the_recorded_leaf_still_decides_once_nothing_is_running(tmp_path: Path) -> None:
