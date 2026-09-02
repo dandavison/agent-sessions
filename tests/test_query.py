@@ -211,6 +211,21 @@ def test_get_by_unambiguous_prefix(conn) -> None:
     assert found_id(conn, "7dae") == "claude:7daebc42-3ff5"
 
 
+def test_get_by_the_title_the_agent_resumes_by(conn) -> None:
+    """Claude prints `claude --resume "z-es"` on the way out, and that is a title.
+
+    It is the handle I am actually holding when I come here, so it has to be one
+    this resolves.
+    """
+    populate(conn, [session("claude:267be114-15c9", title="z-es")], [])
+    assert found_id(conn, "z-es") == "claude:267be114-15c9"
+
+
+def test_get_refuses_a_title_two_sessions_share(conn) -> None:
+    populate(conn, [session("claude:a1", title="same"), session("claude:a2", title="same")], [])
+    assert query.get(conn, "same") is None
+
+
 def test_get_refuses_an_ambiguous_prefix(conn) -> None:
     populate(conn, [session("claude:ab1"), session("claude:ab2")], [])
     assert query.get(conn, "claude:ab") is None
