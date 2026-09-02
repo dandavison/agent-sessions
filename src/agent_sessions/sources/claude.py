@@ -166,7 +166,7 @@ def parse(path: Path, records: list[dict[str, Any]]) -> Delta | None:
 
     session = _session(path, records, nodes)
     branch_points = _branch_points(nodes)
-    active = _active_branch(nodes, session.leaf_uuid)
+    active = _active_branch(records, nodes)
 
     dag = _nodes(session.id, nodes, branch_points)
     compactions = _compactions(session.id, records)
@@ -222,37 +222,35 @@ def _branch_points(nodes: list[dict[str, Any]]) -> set[str]:
 
 
 def _active_branch(
-    nodes: list[dict[str, Any]], leaf_uuid: str | None, tip: bool = False
+    records: list[dict[str, Any]], nodes: list[dict[str, Any]], tip: bool = False
 ) -> list[dict[str, Any]]:
-    """The live thread: walk parents back from the leaf, then read it forwards.
+    """The live thread: walk parents back from where it ends, then read it forwards.
 
-    Without a `last-prompt` record — 1 file in 3 has none — the leaf is simply
-    the last record written.
+    Where it ends is the leaf the `last-prompt` sidecar names. Without one — 1
+    file in 3 has none — it is simply the last record written.
 
-    `tip` asks for where that branch has got to rather than where the leaf says
-    it had. The leaf lags: about 1 file in 5 has grown past it, and a reader of
-    those is otherwise shown a session missing its last answer. What the leaf
-    is needed for is which branch is live, and that it still answers, so the
-    end of the file is not a substitute for it.
+    That record is written when a turn ends, so it names the branch as of then
+    and nothing since: a turn in flight hangs below it, and a prompt can land
+    beside it rather than below it. `tip` asks instead for the last record
+    appended after it, which is what both of those look like, and is where the
+    thread has actually got to. A leaf written after the records below it is
+    the other case — a rewind — and there the leaf is exactly the answer.
     """
     by_uuid = {n["uuid"]: n for n in nodes}
-    leaf = by_uuid.get(leaf_uuid or "")
+    leaf = by_uuid.get(_sidecar_state(records).get("leafUuid") or "")
     if leaf is None:
         return _thread_to(by_uuid, nodes[-1])
-    return _thread_to(by_uuid, _end_of_branch(nodes, leaf) if tip else leaf)
+    appended = _appended_after_the_leaf(records) if tip else []
+    return _thread_to(by_uuid, appended[-1] if appended else leaf)
 
 
-def _end_of_branch(nodes: list[dict[str, Any]], node: dict[str, Any]) -> dict[str, Any]:
-    """Follow children down from a node, taking the most recently written at a fork."""
-    children: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for n in nodes:
-        if parent := n.get("parentUuid"):
-            children[parent].append(n)
-    seen = set()
-    while (below := children.get(node["uuid"])) and node["uuid"] not in seen:
-        seen.add(node["uuid"])
-        node = below[-1]
-    return node
+def _appended_after_the_leaf(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The nodes written after the leaf was, which is everything it cannot know."""
+    recorded = max(
+        (i for i, r in enumerate(records) if r.get("type") == "last-prompt" and r.get("leafUuid")),
+        default=-1,
+    )
+    return [r for r in records[recorded + 1 :] if r.get("type") in NODE_TYPES and r.get("uuid")]
 
 
 def _thread_to(
@@ -431,7 +429,7 @@ def blocks(
     """
     nodes = [r for r in records if r.get("type") in NODE_TYPES and r.get("uuid")]
     if not whole:
-        nodes = _active_branch(nodes, _sidecar_state(records).get("leafUuid"), tip=tip)
+        nodes = _active_branch(records, nodes, tip=tip)
     if since:
         nodes = _after(nodes, since)
     boundaries = {c.uuid for c in _compactions("", records)}
@@ -458,7 +456,7 @@ def blocks(
 def leaf(records: list[dict[str, Any]]) -> str:
     """Where the thread currently ends, for asking what came after it later."""
     nodes = [r for r in records if r.get("type") in NODE_TYPES and r.get("uuid")]
-    active = _active_branch(nodes, _sidecar_state(records).get("leafUuid"))
+    active = _active_branch(records, nodes)
     return str(active[-1]["uuid"]) if active else ""
 
 
@@ -537,6 +535,10 @@ def fork_at(path: Path, at_uuid: str) -> str:
     what its own fork writes — the ancestry of the leaf, under a new session
     id, every record stamped with where it came from — stopped earlier. The
     session it came from is not touched.
+
+    A point names an exchange, not a record, so what is written ends where that
+    exchange did: picking up at a prompt carries the answer to it, which is the
+    state the session was actually in.
     """
     records = _read(path)
     nodes = [r for r in records if r.get("type") in NODE_TYPES and r.get("uuid")]
@@ -544,7 +546,7 @@ def fork_at(path: Path, at_uuid: str) -> str:
     if at_uuid not in by_uuid:
         raise ValueError(f"{at_uuid} is not a point in {path.name}.")
 
-    thread = {n["uuid"] for n in _thread_to(by_uuid, by_uuid[at_uuid])}
+    thread = {n["uuid"] for n in _thread_to(by_uuid, _end_of_turn(nodes, by_uuid[at_uuid]))}
     parent = nodes[0].get("sessionId") or path.stem
     native = str(uuid4())
     path.with_name(f"{native}.jsonl").write_bytes(
@@ -555,6 +557,25 @@ def fork_at(path: Path, at_uuid: str) -> str:
         )
     )
     return native
+
+
+def _end_of_turn(nodes: list[dict[str, Any]], node: dict[str, Any]) -> dict[str, Any]:
+    """The last record before the next prompt, following children down.
+
+    The most recently written child is taken at a fork, so a rewound exchange
+    resolves to the answer that stood rather than the one it replaced.
+    """
+    children: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for n in nodes:
+        if parent := n.get("parentUuid"):
+            children[parent].append(n)
+    seen = set()
+    while (below := children.get(node["uuid"])) and node["uuid"] not in seen:
+        seen.add(node["uuid"])
+        if below[-1].get("type") == "user" and _text(below[-1]):
+            break
+        node = below[-1]
+    return node
 
 
 def _forked(record: dict[str, Any], native: str, parent: str) -> dict[str, Any]:

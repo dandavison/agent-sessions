@@ -245,10 +245,11 @@ def transcribed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
         assistant("a1", "u1", [text_block("first answer")], "req_1"),
         user("u2", "a1", "second question"),
         assistant("a2", "u2", [tool_use("Bash")], "req_2"),
+        # Written mid-turn, as the real thing writes it: what the turn appends
+        # next comes after it in the file and is not on the branch it names.
+        last_prompt("a2"),
         tool_result("r2", "a2"),
         assistant("a3", "r2", [text_block("second answer")], "req_2"),
-        # Written mid-turn and left behind by it, as the real thing leaves it.
-        last_prompt("a2"),
     ]
     project = tmp_path / "-Users-dan-src-wormhole"
     project.mkdir()

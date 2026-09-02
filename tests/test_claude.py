@@ -454,7 +454,7 @@ def test_the_new_session_indexes_as_a_fork_of_the_old(tmp_path: Path) -> None:
 def test_a_compaction_summary_is_carried_over(tmp_path: Path) -> None:
     """Resuming after a compaction needs the boundary and the summary, not the era before it."""
     _, records = forked_at(tmp_path, compacted(), "u2")
-    assert [r["uuid"] for r in records] == ["c1", "s1", "u2"]
+    assert [r["uuid"] for r in records] == ["c1", "s1", "u2", "a2"]
 
 
 def test_a_point_that_is_not_in_the_transcript_is_an_error(tmp_path: Path) -> None:
