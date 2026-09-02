@@ -152,12 +152,18 @@ def worked_in(conn: sqlite3.Connection) -> tuple[list[str], list[str]]:
 
 
 def get(conn: sqlite3.Connection, id: str) -> dict | None:
-    """Resolve a session by full id, bare native id, or any unambiguous prefix."""
+    """Resolve a session by full id, bare native id, title, or unambiguous prefix.
+
+    The title because that is the handle the agent hands out: Claude prints
+    `claude --resume "<title>"` when a session is left, and it is what I am
+    holding when I come here. Exactly, not by prefix — a title is prose, and
+    half of one matching is a coincidence rather than a reference.
+    """
     rows = conn.execute(
         f"SELECT {COLUMNS}, native_id, leaf_uuid, path FROM session"
-        " WHERE id = ? OR native_id = ? OR id LIKE ? OR native_id LIKE ?"
+        " WHERE id = ? OR native_id = ? OR title = ? OR id LIKE ? OR native_id LIKE ?"
         " LIMIT 2",
-        (id, id, f"{id}%", f"{id}%"),
+        (id, id, id, f"{id}%", f"{id}%"),
     ).fetchall()
     if len(rows) != 1:
         return None
