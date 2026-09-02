@@ -6,8 +6,16 @@ a stretch of a transcript.
 """
 
 import time
+from dataclasses import dataclass
 
 from agent_sessions import topology
+
+# What a turn is worth printing before what is left is worth folding away. A
+# prompt is a few lines; anything of this size is something pasted into one.
+SHOWN_LINES = 25
+SHOWN_CHARS = 2_000
+
+FENCE = "```"
 
 
 def date(when: int | None, with_time: bool = False) -> str:
@@ -66,6 +74,57 @@ def turn(t: dict) -> dict:
         "context": tokens(t["context_tokens"]),
         "text": t["text"],
     }
+
+
+@dataclass(frozen=True, slots=True)
+class Trimmed:
+    """As much of a turn as is worth printing, and the rest of it.
+
+    `rest` is empty for nearly every turn. `lines` is what the rest amounts to,
+    which is the one thing worth saying about text nobody is being shown.
+    """
+
+    head: str
+    rest: str
+    lines: int = 0
+
+
+def trimmed(text: str) -> Trimmed:
+    """Cut a turn down to what is worth reading, keeping the rest whole.
+
+    Most of a turn is sometimes what I pasted into it. Nothing in the
+    transcript says so — the text arrives inlined, and only Claude's own prompt
+    history keeps the `[Pasted text #1 +32 lines]` placeholder — so length is
+    all there is to go on: too many lines, or too much of one.
+    """
+    if len(text) <= SHOWN_CHARS and text.count("\n") < SHOWN_LINES:
+        return Trimmed(head=text, rest="")
+    cut = _cut(text)
+    head, rest = text[:cut], text[cut:]
+    lines = len(rest.splitlines())
+    if fence := _unclosed_fence(head):
+        head, rest = f"{head}\n{FENCE}", f"{fence}\n{rest}"
+    return Trimmed(head=head, rest=rest, lines=lines)
+
+
+def _cut(text: str) -> int:
+    """On a line where there is one: half a line reads as a mistake.
+
+    Within one where there is not, which is a paste that arrived as a single
+    line and has nowhere better to be cut.
+    """
+    by_lines = len("".join(text.splitlines(keepends=True)[:SHOWN_LINES]))
+    by_size = text.rfind("\n", 0, SHOWN_CHARS) + 1 or SHOWN_CHARS
+    return min(by_lines, by_size)
+
+
+def _unclosed_fence(head: str) -> str:
+    """The fence a cut landed inside, language and all, to open again below it.
+
+    The two halves are rendered apart, and half a fence is neither code nor prose.
+    """
+    fences = [line for line in head.splitlines() if line.startswith(FENCE)]
+    return fences[-1] if len(fences) % 2 else ""
 
 
 def snippet(text: str, query_text: str) -> str:

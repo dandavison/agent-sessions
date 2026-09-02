@@ -311,6 +311,10 @@ def _coloured(code: str, language: str) -> str:
 def _turn(id: str, t: dict, carried: Carried | None) -> str:
     """The prompt, what it is addressed by, and — folded away — what it got back.
 
+    A turn that is mostly something pasted into it is folded the same way, so
+    one paste cannot cost the page every turn under it. Nothing is dropped:
+    what is copied and what `cat` prints are the turn entire.
+
     The actions sit in the metadata line and wait for the turn to be hovered,
     as the resume links in a row of the index do; the point beside them is text
     to copy into a command, not a third way to resume.
@@ -345,7 +349,19 @@ def _turn(id: str, t: dict, carried: Carried | None) -> str:
         f"<a class='act resume' href='{_resume_link(id, at=t['uuid'])}'"
         f" aria-label='resume here in a terminal' title='resume here in a terminal'>"
         f"{PROMPT}</a></span></div>"
-        f"<div class=md>{_markdown(d['text'])}</div>{answer}"
+        f"{_said(d['text'])}{answer}"
+    )
+
+
+def _said(text: str) -> str:
+    """A prompt, with whatever of it was pasted in behind a fold of its own."""
+    cut = display.trimmed(text)
+    if not cut.rest:
+        return f"<div class=md>{_markdown(cut.head)}</div>"
+    return (
+        f"<div class=md>{_markdown(cut.head)}</div>"
+        f"<details class=rest><summary>{display.plural(cut.lines, 'line')} more</summary>"
+        f"<div class=md>{_markdown(cut.rest)}</div></details>"
     )
 
 
@@ -810,6 +826,14 @@ h2 .toggle.on { color: var(--accent);
 .answer summary:hover { color: var(--accent) }
 .answer[open] summary { margin-bottom: 4px }
 .answer[open] summary svg { rotate: 90deg }
+
+/* Said in words rather than with a chevron: unlike an answer, what is under
+   this is the same thing as what is above it, so the fold has to say why. */
+.rest summary { color: var(--dim); cursor: pointer; width: fit-content; font-size: 12px;
+                padding: 1px 5px; border-radius: 5px;
+                background: color-mix(in oklab, var(--fg) 6%, transparent) }
+.rest summary:hover { color: var(--accent) }
+.rest[open] summary { margin-bottom: 6px }
 
 /* Nothing here is given a height of its own. A box that scrolls inside a page
    that scrolls is two things to drive instead of one, and a fold that opens
