@@ -36,7 +36,6 @@ from agent_sessions import (
     models,
     query,
     resume,
-    topology,
 )
 from agent_sessions.mark import MARK
 from agent_sessions.models import Block, Boundary, Ran, Said
@@ -173,7 +172,6 @@ def _session(conn: sqlite3.Connection, id: str, params: dict[str, str]) -> Respo
         return _error(404, f"No single session matches {id!r}.")
 
     tools = params.get("tools") in ("1", "true")
-    shape = topology.of(conn, session)
     fields = "".join(
         f"<div class=field><dt>{_h(k)}<dd>{_h(str(v))}</div>"
         for k, v in display.details(session).items()
@@ -190,7 +188,6 @@ def _session(conn: sqlite3.Connection, id: str, params: dict[str, str]) -> Respo
         f"<h1>{_h(session['title'] or session['id'])}</h1>",
         f"<p class=actions>{_actions(session['id'])}</p>",
         f"<dl class=details>{fields}</dl>",
-        f"<h2>shape</h2>{_tree(session['id'], shape)}",
         f"<h2>turns{_tools_button(session['id'], tools) if carried else ''}</h2>"
         f"<ol class=turns>{said}</ol>"
         if said
@@ -371,49 +368,6 @@ def _tools_button(id: str, on: bool) -> str:
     return (
         f"<a class='act toggle{' on' if on else ''}' href='{where}'"
         f" aria-label='show what was run' title='show what was run'>{CODE}</a>"
-    )
-
-
-def _tree(id: str, shape: topology.Topology) -> str:
-    parts = []
-    if origin := shape.forked_from:
-        parts.append(
-            f"<p class=edge>forked from <a href='{_link(origin['parent'])}'>"
-            f"{_h(origin['parent'])}</a> at {_h((origin['at_uuid'] or '')[:8])}</p>"
-        )
-    parts.append(f"<ul class=tree>{''.join(_branch(id, root) for root in shape.roots)}</ul>")
-    for fork in shape.forks:
-        parts.append(
-            f"<p class=edge>fork → <a href='{_link(fork['child'])}'>{_h(fork['child'])}</a>"
-            f" at {_h((fork['at_uuid'] or '')[:8])}</p>"
-        )
-    return "".join(parts)
-
-
-def _branch(id: str, segment: topology.Segment) -> str:
-    """The label is styled, not the item: strikethrough on a list item reaches its children.
-
-    Each stretch offers to pick the session up where that stretch ended, which
-    is the reason to be reading its shape at all — offered the way the turns
-    below and the rows of the index offer it, waiting to be hovered. The line
-    is wrapped so that hovering a nested stretch does not light up its parents.
-    """
-    classes = " ".join(
-        c
-        for c, on in (("compaction", bool(segment.compaction)), ("abandoned", segment.abandoned))
-        if on
-    )
-    below = (
-        f"<ul>{''.join(_branch(id, child) for child in segment.children)}</ul>"
-        if segment.children
-        else ""
-    )
-    return (
-        f"<li><span class=line><span class='{classes}'>{_h(display.describe(segment))}</span> "
-        f"<span class=point>{_h(display.point(segment.end))}</span>"
-        f"<a class='act resume' href='{_resume_link(id, at=segment.end)}'"
-        f" aria-label='resume where this ended' title='resume where this ended'>"
-        f"{PROMPT}</a></span>{below}"
     )
 
 
@@ -785,12 +739,6 @@ tr:hover td .resume, td .resume:focus-visible { opacity: 1 }
            gap: 10px 20px; margin: 12px 0 }
 .field dt { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim) }
 .field dd { margin: 1px 0 0; overflow-wrap: anywhere }
-.tree, .tree ul { list-style: none; margin: 0; padding-left: 18px;
-                  border-left: 1px solid var(--line) }
-.tree { padding-left: 0; border: 0 }
-.tree li { padding: 2px 0 }
-.tree .compaction { color: var(--dim); font-style: italic }
-.tree .abandoned { color: var(--dim); text-decoration: line-through }
 .point { color: var(--dim); font-size: 12px; font-family: ui-monospace, SFMono-Regular, monospace }
 .turns { list-style: none; padding: 0; margin: 0 }
 .turn { border-top: 1px solid var(--line); padding: 12px 0 12px 10px;
@@ -810,8 +758,6 @@ tr:hover td .resume, td .resume:focus-visible { opacity: 1 }
 .turn:hover .act, .act:focus-visible, .act.done { opacity: 1 }
 .act:hover { color: var(--accent); background: color-mix(in oklab, var(--fg) 6%, transparent) }
 .act.done { color: var(--live) }
-.tree .line:hover .act, .tree .act:focus-visible { opacity: 1 }
-.tree .act { padding: 1px 3px }
 h2 .toggle { opacity: 1; margin-left: 8px; vertical-align: middle }
 h2 .toggle.on { color: var(--accent);
                 background: color-mix(in oklab, var(--accent) 14%, transparent) }

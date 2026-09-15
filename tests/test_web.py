@@ -244,10 +244,6 @@ def test_a_point_no_one_can_find_is_a_404(indexed: Path, resumes: list[dict]) ->
     assert resumes == []
 
 
-def test_the_shape_offers_to_resume_at_each_point(indexed: Path) -> None:
-    assert f"/resume/{ID}@a1" in web.handle(f"/session/{ID}").body
-
-
 # --- finding things --------------------------------------------------------
 
 
@@ -316,49 +312,6 @@ def test_an_unknown_session_is_a_404(indexed: Path) -> None:
 
 def test_an_unknown_path_is_a_404(indexed: Path) -> None:
     assert web.handle("/nowhere").status == 404
-
-
-def test_a_lost_branch_does_not_strike_out_what_came_after_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Struck-through text reaches the children of the element it is set on.
-
-    Which would read as though branches that were taken had been abandoned, so
-    the styling goes on the label rather than the item holding the subtree.
-    """
-    path = tmp_path / "index.db"
-    conn = db.connect(path)
-    db.write_session(
-        conn,
-        Session(
-            id=ID,
-            agent="claude",
-            native_id=NATIVE,
-            path="/t/a.jsonl",
-            project="wormhole",
-            title="rewound once",
-            leaf_uuid="c1",
-            ended_at=1_785_000_000,
-        ),
-    )
-    db.write_nodes(
-        conn,
-        [
-            Node(ID, "u1", None, 0, "user", 1, "start"),
-            Node(ID, "a1", "u1", 1, "assistant", 2, ""),
-            Node(ID, "b1", "a1", 2, "assistant", 3, ""),
-            Node(ID, "b2", "b1", 3, "assistant", 4, ""),
-            Node(ID, "b3", "b1", 4, "assistant", 5, ""),
-            Node(ID, "c1", "a1", 5, "assistant", 6, ""),
-        ],
-    )
-    conn.commit()
-    conn.close()
-    monkeypatch.setattr(db, "DB_PATH", path)
-
-    body = web.handle(f"/session/{ID}").body
-    lost = body.index("class='abandoned'")
-    assert body.index("</span>", lost) < body.index("<ul>", lost)
 
 
 # --- a turn that is mostly something pasted --------------------------------
