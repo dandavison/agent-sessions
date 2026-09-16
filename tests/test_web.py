@@ -13,7 +13,7 @@ import pytest
 from conftest import assistant, text_block, tool_result, tool_use, user
 
 from agent_sessions import db, index, query, web, wormhole
-from agent_sessions.models import Node, Running, Session
+from agent_sessions.models import Edge, Node, Running, Session
 from agent_sessions.sources.claude import encode
 
 ID = "claude:7e90a7c6-ce43-4dfd-9d7c-8eb01ac7ccf2"
@@ -312,6 +312,54 @@ def test_an_unknown_session_is_a_404(indexed: Path) -> None:
 
 def test_an_unknown_path_is_a_404(indexed: Path) -> None:
     assert web.handle("/nowhere").status == 404
+
+
+# --- branches --------------------------------------------------------------
+
+BRANCH = "claude:11111111-1111-1111-1111-111111111111"
+
+
+def branched(path: Path, at: str | None) -> None:
+    """A session `/branch` left behind, spliced into this one at `at`."""
+    conn = db.connect(path)
+    db.write_session(
+        conn,
+        Session(
+            id=BRANCH,
+            agent="claude",
+            native_id=BRANCH.split(":")[1],
+            path="/t/branch.jsonl",
+            project="wormhole",
+            title="try it without submodules",
+            ended_at=1_785_000_002,
+        ),
+    )
+    db.write_edges(conn, [Edge(child=BRANCH, parent=ID, kind="fork", at_uuid=at)])
+    conn.commit()
+    conn.close()
+
+
+def test_a_branch_is_shown_at_the_turn_it_left(indexed: Path) -> None:
+    """The point of showing it at all is knowing where the conversation divided."""
+    said(indexed, "u2", "try something else")
+    branched(indexed, at="a1")
+
+    body = web.handle(f"/session/{ID}").body
+    assert "try it without submodules" in body
+    assert body.index(f"/session/{BRANCH}") < body.index("try something else")
+
+
+def test_a_branch_with_no_point_to_hang_on_is_still_shown(indexed: Path) -> None:
+    branched(indexed, at=None)
+    assert f"/session/{BRANCH}" in web.handle(f"/session/{ID}").body
+
+
+def test_a_branch_links_back_to_what_it_left(indexed: Path) -> None:
+    branched(indexed, at="a1")
+
+    body = web.handle(f"/session/{BRANCH}").body
+    assert f"/session/{ID}" in body
+    assert "relocating worktrees" in body
 
 
 # --- a turn that is mostly something pasted --------------------------------
