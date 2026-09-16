@@ -178,8 +178,12 @@ def _session(conn: sqlite3.Connection, id: str, params: dict[str, str]) -> Respo
         if v
     )
     carried = _answers(session, tools)
+    left: dict[str, list[dict]] = {}
+    for fork in query.forks(conn, session["id"]):
+        left.setdefault(fork["turn"] or "", []).append(fork)
     said = "".join(
-        _turn(session["id"], t, carried.get(t["uuid"])) for t in query.turns(conn, session["id"])
+        _turn(session["id"], t, carried.get(t["uuid"]), left.get(t["uuid"], []))
+        for t in query.turns(conn, session["id"])
     )
     return _page(
         session["title"] or session["id"],
@@ -188,6 +192,7 @@ def _session(conn: sqlite3.Connection, id: str, params: dict[str, str]) -> Respo
         f"<h1>{_h(session['title'] or session['id'])}</h1>",
         f"<p class=actions>{_actions(session['id'])}</p>",
         f"<dl class=details>{fields}</dl>",
+        _lineage(query.forked_from(conn, session["id"]), left.get("", [])),
         f"<h2>turns{_tools_button(session['id'], tools) if carried else ''}</h2>"
         f"<ol class=turns>{said}</ol>"
         if said
@@ -305,7 +310,35 @@ def _coloured(code: str, language: str) -> str:
     return highlight(code, get_lexer_by_name(language), FORMATTER)
 
 
-def _turn(id: str, t: dict, carried: Carried | None) -> str:
+def _lineage(origin: dict | None, adrift: list[dict]) -> str:
+    """What this session was branched off, above everything it says.
+
+    A branch whose point in the conversation is unknown is shown here too,
+    which is the best that can be done with it: it is still a session worth
+    reaching, and there is no turn to put it under.
+    """
+    lines = []
+    if origin:
+        lines.append(f"branched from {_titled(origin['parent'], origin['title'])}")
+    if adrift:
+        lines.append(f"branched → {_titled_all(adrift)}")
+    return "".join(f"<p class=branch>{line}</p>" for line in lines)
+
+
+def _branches(forks: list[dict]) -> str:
+    """Where `/branch` was used, under the turn the branch left from."""
+    return f"<p class=branch>branched → {_titled_all(forks)}</p>" if forks else ""
+
+
+def _titled_all(forks: list[dict]) -> str:
+    return ", ".join(_titled(f["child"], f["title"]) for f in forks)
+
+
+def _titled(id: str, title: str | None) -> str:
+    return f"<a href='{_link(id)}'>{_h(title or id)}</a>"
+
+
+def _turn(id: str, t: dict, carried: Carried | None, forks: list[dict]) -> str:
     """The prompt, what it is addressed by, and — folded away — what it got back.
 
     A turn that is mostly something pasted into it is folded the same way, so
@@ -346,7 +379,7 @@ def _turn(id: str, t: dict, carried: Carried | None) -> str:
         f"<a class='act resume' href='{_resume_link(id, at=t['uuid'])}'"
         f" aria-label='resume here in a terminal' title='resume here in a terminal'>"
         f"{PROMPT}</a></span></div>"
-        f"{_said(d['text'])}{answer}"
+        f"{_said(d['text'])}{answer}{_branches(forks)}"
     )
 
 
@@ -740,6 +773,7 @@ tr:hover td .resume, td .resume:focus-visible { opacity: 1 }
 .field dt { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim) }
 .field dd { margin: 1px 0 0; overflow-wrap: anywhere }
 .point { color: var(--dim); font-size: 12px; font-family: ui-monospace, SFMono-Regular, monospace }
+.branch { color: var(--dim); font-size: 12px; margin: 6px 0 0 }
 .turns { list-style: none; padding: 0; margin: 0 }
 .turn { border-top: 1px solid var(--line); padding: 12px 0 12px 10px;
         border-left: 2px solid transparent }

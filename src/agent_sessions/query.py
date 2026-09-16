@@ -208,7 +208,7 @@ def turns(conn: sqlite3.Connection, session_id: str) -> list[dict]:
     """
     rows = conn.execute(
         """
-        SELECT uuid, role, ts, text, is_branch_point,
+        SELECT uuid, seq, role, ts, text, is_branch_point,
                (SELECT reply.context_tokens FROM node reply
                  WHERE reply.session_id = node.session_id
                    AND reply.seq >= node.seq
@@ -221,3 +221,49 @@ def turns(conn: sqlite3.Connection, session_id: str) -> list[dict]:
         (session_id,),
     )
     return [dict(row) for row in rows]
+
+
+def forks(conn: sqlite3.Connection, session_id: str) -> list[dict]:
+    """Sessions branched off this one, each with the turn it left from.
+
+    A fork records the uuid of the message it was spliced at, which is rarely a
+    turn of its own; the turn it belongs to is the last one at or before it. A
+    fork of a session that is not indexed has nothing to hang on, and gets no
+    turn.
+    """
+    rows = [
+        dict(r)
+        for r in conn.execute(
+            "SELECT child, at_uuid, session.title FROM session_edge"
+            " LEFT JOIN session ON session.id = child"
+            " WHERE parent = ? AND kind = 'fork'",
+            (session_id,),
+        )
+    ]
+    if not rows:
+        return []
+    seq = {
+        r["uuid"]: r["seq"]
+        for r in conn.execute("SELECT uuid, seq FROM node WHERE session_id = ?", (session_id,))
+    }
+    starts = sorted((t["seq"], t["uuid"]) for t in turns(conn, session_id))
+    for row in rows:
+        row["turn"] = _turn_holding(starts, seq.get(row["at_uuid"] or ""))
+    return rows
+
+
+def _turn_holding(starts: list[tuple[int, str]], at: int | None) -> str | None:
+    if at is None:
+        return None
+    return next((uuid for seq, uuid in reversed(starts) if seq <= at), None)
+
+
+def forked_from(conn: sqlite3.Connection, session_id: str) -> dict | None:
+    """The session this one was branched off, if it is indexed."""
+    rows = conn.execute(
+        "SELECT parent, at_uuid, session.title FROM session_edge"
+        " LEFT JOIN session ON session.id = parent"
+        " WHERE child = ? AND kind = 'fork'",
+        (session_id,),
+    ).fetchall()
+    return dict(rows[0]) if rows else None

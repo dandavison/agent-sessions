@@ -8,6 +8,8 @@ what is left to look at is the branching.
 import sqlite3
 from dataclasses import dataclass, field
 
+from agent_sessions import query
+
 
 @dataclass(slots=True)
 class Segment:
@@ -50,23 +52,8 @@ def of(conn: sqlite3.Connection, session: dict) -> Topology:
     _mark_active(roots, _ancestry(nodes, session.get("leaf_uuid")))
     return Topology(
         roots=roots,
-        forks=[
-            dict(r)
-            for r in conn.execute(
-                "SELECT child, at_uuid FROM session_edge WHERE parent = ? AND kind = 'fork'",
-                (session["id"],),
-            )
-        ],
-        forked_from=next(
-            (
-                dict(r)
-                for r in conn.execute(
-                    "SELECT parent, at_uuid FROM session_edge WHERE child = ? AND kind = 'fork'",
-                    (session["id"],),
-                )
-            ),
-            None,
-        ),
+        forks=query.forks(conn, session["id"]),
+        forked_from=query.forked_from(conn, session["id"]),
     )
 
 

@@ -111,14 +111,20 @@ def test_forks_out_are_listed(conn) -> None:
     session = build(conn, [node("u1", None, 0)], "u1")
     db.write_edges(conn, [Edge(child="claude:b", parent=SID, kind="fork", at_uuid="u1")])
     conn.commit()
-    assert topology.of(conn, session).forks == [{"child": "claude:b", "at_uuid": "u1"}]
+    assert topology.of(conn, session).forks == [
+        {"child": "claude:b", "at_uuid": "u1", "title": None, "turn": "u1"}
+    ]
 
 
 def test_the_fork_it_came_from_is_named(conn) -> None:
     session = build(conn, [node("u1", None, 0)], "u1")
     db.write_edges(conn, [Edge(child=SID, parent="claude:parent", kind="fork", at_uuid="u1")])
     conn.commit()
-    assert topology.of(conn, session).forked_from == {"parent": "claude:parent", "at_uuid": "u1"}
+    assert topology.of(conn, session).forked_from == {
+        "parent": "claude:parent",
+        "at_uuid": "u1",
+        "title": None,
+    }
 
 
 def test_a_session_with_no_forks(conn) -> None:
