@@ -1,5 +1,6 @@
 """Reading the index. Nothing here writes."""
 
+import re
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -125,9 +126,32 @@ def search(
         ORDER BY best.rank * (1 + {_RECENCY}) ASC
         LIMIT ? OFFSET ?
         """,
-        [query, *values, limit, offset],
+        [as_match(query), *values, limit, offset],
     )
     return [dict(row) for row in rows]
+
+
+def as_match(text: str) -> str:
+    """User text as an FTS5 query: a URL or a path is a term, not syntax.
+
+    FTS5 reads `https://…` as a column filter and rejects it, and the string
+    most worth searching for is often one of those. So anything FTS5 would not
+    take as a bareword becomes a quoted phrase, which matches its words in
+    order. Phrases, prefixes, operators and grouping still mean what they say.
+    """
+    return " ".join(
+        term if _is_syntax(term) else '"{}"'.format(term.replace('"', ""))
+        for term in _TERMS.findall(text)
+    )
+
+
+def _is_syntax(term: str) -> bool:
+    return term.startswith('"') or term in _OPERATORS or _BAREWORD.fullmatch(term) is not None
+
+
+_TERMS = re.compile(r'"[^"]*"?|[()]|[^\s()]+')
+_OPERATORS = frozenset({"AND", "OR", "NOT", "NEAR", "(", ")"})
+_BAREWORD = re.compile(r"\w+\*?")
 
 
 # bm25 is negative and lower is better, so the boost multiplies: a recent hit

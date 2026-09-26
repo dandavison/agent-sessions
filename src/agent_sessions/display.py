@@ -5,6 +5,7 @@ decides how one value reads: a token count, a date, the one line that describes
 a stretch of a transcript.
 """
 
+import re
 import time
 from dataclasses import dataclass
 
@@ -130,7 +131,7 @@ def _unclosed_fence(head: str) -> str:
 def snippet(text: str, query_text: str) -> str:
     """The matching node, trimmed to the neighbourhood of the first matching word."""
     flat = " ".join(text.split())
-    words = [w.strip('"*').lower() for w in query_text.split() if w.isalnum()]
+    words = [w.lower() for w in re.findall(r"\w+", query_text)]
     lowered = flat.lower()
     at = next((i for w in words if (i := lowered.find(w)) >= 0), 0)
     start = max(0, at - 40)

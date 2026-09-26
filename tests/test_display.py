@@ -41,3 +41,9 @@ def test_a_cut_inside_a_fence_closes_it_and_opens_it_again() -> None:
 def test_the_fence_it_reopens_is_not_counted_as_a_line_of_mine() -> None:
     cut = display.trimmed("```\n" + "\n".join(LINES) + "\n```")
     assert cut.lines == len(cut.rest.splitlines()) - 1
+
+
+def test_a_snippet_is_cut_around_a_punctuated_query() -> None:
+    """A URL is words to FTS5 and should be words here too, or the cut misses it."""
+    text = "preamble " * 40 + "posted at https://github.com/temporalio/temporal/pull/1 today"
+    assert "github.com" in display.snippet(text, "https://github.com/temporalio/temporal/pull/1")
