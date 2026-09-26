@@ -199,14 +199,16 @@ def _attending(control: Control, conn: Any, issue: channel.Issue) -> int:
     session = lookup(conn, issue.session_id)
     waiting = pending(comments, _seen(session))
     if waiting and session is None:
-        # One fact about the issue, so it is said once. Said per prompt, a
-        # stale index turns into a thread full of the same sentence.
-        log.problem(f"#{issue.number} names {issue.session_id}, which is not a session")
-        control.post(
-            issue.number,
+        # Once, and asked of the thread rather than of memory: the prompt is
+        # never consumed, so it waits for as long as the loop runs, and a
+        # restart must not start the same sentence over.
+        say = (
             f"{channel.MARKER}\nNo session matches `{issue.session_id}`."
-            " Fix the table in the issue body.",
+            " Fix the table in the issue body."
         )
+        if not any(c.body == say for c in comments):
+            log.problem(f"#{issue.number} names {issue.session_id}, which is not a session")
+            control.post(issue.number, say)
         return 0
     if not waiting:
         reconcile(control, issue, session, comments)
