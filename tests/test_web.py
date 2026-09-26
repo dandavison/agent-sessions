@@ -277,6 +277,12 @@ def test_a_malformed_filter_is_reported_on_the_page(indexed: Path) -> None:
     assert "2y" in response.body
 
 
+def test_a_pasted_url_is_a_search_rather_than_an_error(indexed: Path) -> None:
+    response = web.handle("/", "q=https%3A%2F%2Fgithub.com%2Ftemporalio%2Ftemporal%2Fpull%2F1")
+    assert response.status == 200
+    assert "class=banner" not in response.body
+
+
 def test_a_malformed_query_is_reported_on_the_page(indexed: Path) -> None:
     response = web.handle("/", "q=AND")
     assert response.status == 400

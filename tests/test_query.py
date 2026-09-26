@@ -181,6 +181,31 @@ def test_search_supports_phrases(conn) -> None:
     }
 
 
+URL = "https://github.com/temporalio/dandavison-log/issues/379"
+
+
+def test_search_takes_a_pasted_url(conn) -> None:
+    """A URL is what I am holding when I want the session that wrote it."""
+    populate(
+        conn,
+        [session("claude:posted", project="temporal")],
+        [Node("claude:posted", "p1", None, 0, "assistant", NOW, f"Posted it: {URL}")],
+    )
+    assert ids(query.search(conn, URL, query.Filters(), 10)) == {"claude:posted"}
+
+
+def test_search_takes_a_path(conn) -> None:
+    corpus(conn)
+    populate(
+        conn,
+        [session("claude:files", project="wormhole")],
+        [Node("claude:files", "f1", None, 0, "user", NOW, "look at src/agent_sessions/query.py")],
+    )
+    assert ids(query.search(conn, "src/agent_sessions/query.py", query.Filters(), 10)) == {
+        "claude:files"
+    }
+
+
 def test_search_matches_nothing_when_nothing_matches(conn) -> None:
     corpus(conn)
     assert query.search(conn, "kangaroo", query.Filters(), 10) == []
