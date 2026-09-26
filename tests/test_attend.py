@@ -243,6 +243,18 @@ def test_an_issue_naming_no_session_is_said_to_be_wrong(turns: list[dict], found
     assert "claude:nope" in c.posted[0][1]
 
 
+def test_an_issue_naming_no_session_is_said_once_not_once_a_pass(turns: list[dict], found) -> None:
+    """A stale row is never consumed, so the prompt waits for as long as the loop runs.
+
+    Said per pass, one such issue posted 1,653 copies of the same sentence and
+    sent an email for each.
+    """
+    c = FakeChannel([issue(session_id="claude:nope")], {4: [prompt()]})
+    for _ in range(5):
+        attend.once(c, conn=None)
+    assert len(c.posted) == 1
+
+
 def test_an_issue_without_frontmatter_is_ignored_not_guessed_at(turns: list[dict], found) -> None:
     """A stray issue in the repo is not an invitation to run an agent."""
     c = FakeChannel(
