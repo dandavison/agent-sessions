@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import httpx
 import pytest
 
@@ -92,6 +94,29 @@ def test_paths_outside_the_worktree_dir_are_unaffected() -> None:
     a = with_worktrees()
     assert a.project_for("/Users/dan/.cargo/registry/src/index.crates.io/parking_lot-0.9") is None
     assert a.project_for("/tmp/scratch") is None
+
+
+def test_a_worktree_still_on_disk_is_not_attributed_to_its_repo(tmp_path: Path) -> None:
+    """Attributing to the repo is only right for a task whose worktree is gone.
+
+    A worktree that is still there and yet unknown to wormhole means wormhole
+    is wrong about it, and the repo is the wrong answer: a session had in that
+    worktree resumes in the repo's pane, in whatever branch that pane happens
+    to hold.
+    """
+    unreported = tmp_path / "temporal" / "dan--unreported" / "temporal"
+    unreported.mkdir(parents=True)
+    a = Attributor(
+        [
+            Worktree(
+                "temporal:dan/live",
+                str(tmp_path / "temporal" / "dan--live" / "temporal"),
+                "temporal",
+                "dan/live",
+            )
+        ]
+    )
+    assert a.project_for(str(unreported)) is None
 
 
 def test_repo_attribution_needs_a_live_task_to_locate_the_worktree_dir() -> None:
