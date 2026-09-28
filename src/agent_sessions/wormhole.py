@@ -65,6 +65,11 @@ class Attributor:
     — so a closed task is attributed to the bare repo. The worktree directory
     is read off wormhole's own live worktrees rather than assumed, since it is
     configurable.
+
+    That reading only holds while the worktree is gone. One still on disk and
+    yet unreported means wormhole is wrong about it, and answering with the
+    repo resumes the session in the repo's pane, in whatever branch it holds.
+    Nothing is attributed in that case.
     """
 
     def __init__(self, worktrees: list[Worktree]) -> None:
@@ -90,7 +95,11 @@ class Attributor:
             parts = Path(path).relative_to(self._worktree_dir).parts
         except ValueError:
             return None
-        return parts[0] if parts and parts[0] in self._repos else None
+        if len(parts) < 3 or parts[0] not in self._repos:
+            return None
+        if self._worktree_dir.joinpath(*parts[:3]).is_dir():
+            return None
+        return parts[0]
 
 
 def _worktree_dir(worktrees: list[Worktree]) -> Path | None:
