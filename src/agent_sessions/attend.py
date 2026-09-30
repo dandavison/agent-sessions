@@ -157,6 +157,21 @@ def a_pass(control: Control, conn: Any) -> int:
         return 0
 
 
+def _survivable(control: Control, conn: Any, issue: channel.Issue) -> int:
+    """One issue, and whatever went wrong on it is not the end of the pass.
+
+    Abandoned at the first bad issue, the pass never reached the ones behind
+    it: one deleted transcript stopped every other thread being attended.
+    """
+    try:
+        return _attend(control, conn, issue)
+    except (channel.NotAuthorized, limits.Tripped):
+        raise
+    except Exception as e:  # noqa: BLE001 — the pass outliving the issue is the point
+        log.problem(f"#{issue.number} {type(e).__name__}: {e}")
+        return 0
+
+
 def once(control: Control, conn: Any, only: int | None = None) -> int:
     """One pass over the open issues. Returns how many prompts were answered.
 
@@ -171,7 +186,7 @@ def once(control: Control, conn: Any, only: int | None = None) -> int:
         if not issue.session_id:
             log.detail(f"#{issue.number} names no session")
             continue
-        answered += _attend(control, conn, issue)
+        answered += _survivable(control, conn, issue)
     return answered
 
 
@@ -522,7 +537,14 @@ def _said(session: dict[str, Any] | None) -> list[str]:
 
 
 def lookup(conn: Any, session_id: str) -> dict[str, Any] | None:
-    return query.get(conn, session_id)
+    """The session, if there is still a transcript to append to.
+
+    A row whose transcript has been deleted is not a session: the index is
+    behind, and everything downstream reads the file. Returned anyway, reading
+    it raised FileNotFoundError once a second.
+    """
+    session = query.get(conn, session_id)
+    return session if session and Path(session["path"]).exists() else None
 
 
 def run_turn(
