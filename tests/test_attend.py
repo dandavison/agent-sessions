@@ -612,6 +612,38 @@ def test_an_interrupted_turn_is_said_to_be_interrupted(
     assert "cut off" in capsys.readouterr().err.lower()
 
 
+def test_a_row_whose_transcript_is_gone_is_not_a_session(monkeypatch) -> None:
+    """The index is behind. Everything downstream reads the file, so a row is not enough."""
+    monkeypatch.setattr(attend.query, "get", lambda conn, id: SESSION)
+    assert attend.lookup(None, "claude:7e90") is None
+
+
+def test_a_session_whose_transcript_is_there_is_found(monkeypatch, tmp_path) -> None:
+    here = SESSION | {"path": str(tmp_path / "7e90.jsonl")}
+    (tmp_path / "7e90.jsonl").write_text("")
+    monkeypatch.setattr(attend.query, "get", lambda conn, id: here)
+    assert attend.lookup(None, "claude:7e90") == here
+
+
+def test_one_bad_issue_does_not_abandon_the_rest_of_the_pass(
+    turns: list[dict], monkeypatch, capsys
+) -> None:
+    """A pass that dies on the first issue never reaches the ones behind it."""
+
+    def lookup(conn, id: str) -> dict | None:
+        if id == "claude:gone":
+            raise FileNotFoundError("/gone/7e90.jsonl")
+        return SESSION
+
+    monkeypatch.setattr(attend, "lookup", lookup)
+    c = FakeChannel(
+        [issue(session_id="claude:gone"), channel.Issue(5, "t", "| session | claude:7e90 |", "")],
+        {4: [prompt()], 5: [prompt(id=12)]},
+    )
+    assert attend.once(c, conn=None) == 1
+    assert "FileNotFoundError" in capsys.readouterr().err
+
+
 def test_a_pass_does_not_swallow_a_credential_failure(monkeypatch, capsys) -> None:
     """Everything else is worth retrying. This is worth stopping for."""
 
