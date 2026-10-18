@@ -18,6 +18,7 @@ from conftest import (
     user,
 )
 
+from agent_sessions import index
 from agent_sessions.models import Delta, Running, Said
 from agent_sessions.sources.claude import ClaudeSource, blocks, parse, render_blocks
 from agent_sessions.sources.claude import _read as read
@@ -839,6 +840,12 @@ def test_the_recorded_leaf_still_decides_once_nothing_is_running(tmp_path: Path)
 
 def personal(tmp_path: Path) -> ClaudeSource:
     return ClaudeSource(tmp_path / ".claude-personal" / "projects", "claude-personal")
+
+
+def test_the_personal_account_is_indexed() -> None:
+    source = index.SOURCES["claude-personal"]
+    assert isinstance(source, ClaudeSource)
+    assert source.root == Path.home() / ".claude-personal" / "projects"
 
 
 def test_another_account_has_its_own_ids(tmp_path: Path) -> None:

@@ -30,7 +30,7 @@ def one_worktree(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def only_claude(projects: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(index.SOURCES, "claude", ClaudeSource(projects))
+    monkeypatch.setattr(index, "SOURCES", {"claude": ClaudeSource(projects)})
 
 
 def write(projects: Path, records: list[dict[str, Any]], session: str = SESSION) -> Path:
@@ -257,10 +257,6 @@ def test_what_was_said_stays_searchable_in_both(projects: Path, tmp_path: Path) 
 
     found = query.search(conn, "relocating", query.Filters(), 10)
     assert {f["id"] for f in found} == {f"claude:{SESSION}", f"claude:{OTHER}"}
-
-
-def test_the_personal_account_is_indexed() -> None:
-    assert index.SOURCES["claude-personal"].root == Path.home() / ".claude-personal" / "projects"
 
 
 def test_sessions_of_two_accounts_are_indexed_together(

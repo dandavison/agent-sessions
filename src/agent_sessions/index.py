@@ -14,7 +14,12 @@ from agent_sessions import db, wormhole
 from agent_sessions.sources import Source
 from agent_sessions.sources.claude import ClaudeSource
 
-SOURCES: dict[str, Source] = {"claude": ClaudeSource()}
+SOURCES: dict[str, Source] = {
+    "claude": ClaudeSource(),
+    "claude-personal": ClaudeSource(
+        Path.home() / ".claude-personal" / "projects", "claude-personal"
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)

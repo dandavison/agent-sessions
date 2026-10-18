@@ -11,6 +11,7 @@ point of the index is work I took part in, and nobody talked to those.
 """
 
 import os
+import shlex
 from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import suppress
@@ -36,11 +37,12 @@ from agent_sessions.models import (
     Session,
 )
 
-PROJECTS_DIR = Path.home() / ".claude" / "projects"
+CONFIG_DIR = Path.home() / ".claude"
+PROJECTS_DIR = CONFIG_DIR / "projects"
 
 # What I typed, kept apart from the transcripts so the input line can offer it
 # back. Append-only, and every session in the one file.
-HISTORY = Path.home() / ".claude" / "history.jsonl"
+HISTORY = "history.jsonl"
 
 # Records that are nodes in the DAG. Everything else is either sidecar state or
 # noise: `attachment` carries injected context, `system` mostly turn timings.
@@ -57,21 +59,25 @@ INTERRUPTIONS = frozenset(
 
 
 class ClaudeSource:
-    name = "claude"
+    """One Claude account: a config dir, of which `root` is the `projects/`."""
+
     remote_home = "https://claude.ai/code"
 
-    def __init__(self, root: Path = PROJECTS_DIR) -> None:
+    def __init__(self, root: Path = PROJECTS_DIR, name: str = "claude") -> None:
         self.root = root
+        self.name = name
 
     def discover(self) -> list[Discovered]:
         """Only top-level sessions: the glob does not descend into `subagents/`."""
-        return [_discovered(f"claude:{p.stem}", p) for p in sorted(self.root.glob("*/*.jsonl"))]
+        return [
+            _discovered(f"{self.name}:{p.stem}", p) for p in sorted(self.root.glob("*/*.jsonl"))
+        ]
 
     def ingest(self, path: Path) -> Delta | None:
-        return parse(path, _read(path))
+        return parse(path, _read(path), self.name)
 
     def live(self) -> dict[str, Running]:
-        return live()
+        return live(self.root.parent / SESSIONS)
 
     def render_blocks(self, chosen: list[Block], tools: bool) -> Iterator[str]:
         return render_blocks(chosen, tools=tools)
@@ -86,7 +92,7 @@ class ClaudeSource:
 
     def resume_command(self, native_id: str, fork: bool = False, remote: bool = False) -> str:
         return (
-            f"claude -r {native_id}"
+            shlex.join([*self._account(), "claude", "-r", native_id])
             + (" --fork-session" if fork else "")
             + (" --remote-control" if remote else "")
         )
@@ -97,6 +103,7 @@ class ClaudeSource:
         # settings apply, deliberately — a turn from the channel is allowed
         # exactly what a turn at the keyboard is.
         return [
+            *self._account(),
             "claude",
             "-p",
             "--resume",
@@ -119,10 +126,15 @@ class ClaudeSource:
         retitle(path, title)
 
     def expunge(self, path: Path, into: Path) -> Path:
-        return expunge(path, into, HISTORY)
+        return expunge(path, into, self.root.parent / HISTORY)
 
     def fork_at(self, path: Path, at_uuid: str) -> str:
         return fork_at(path, at_uuid)
+
+    def _account(self) -> list[str]:
+        """The default account is the one `claude` uses with CLAUDE_CONFIG_DIR unset."""
+        config_dir = self.root.parent
+        return [] if config_dir == CONFIG_DIR else ["env", f"CLAUDE_CONFIG_DIR={config_dir}"]
 
 
 def encode(cwd: str) -> str:
@@ -154,7 +166,7 @@ def _read(path: Path) -> list[dict[str, Any]]:
     return records
 
 
-def parse(path: Path, records: list[dict[str, Any]]) -> Delta | None:
+def parse(path: Path, records: list[dict[str, Any]], agent: str = "claude") -> Delta | None:
     """Fold one transcript into the index's model of it.
 
     None for the sidecar-only files a session leaves when it is started and
@@ -164,7 +176,7 @@ def parse(path: Path, records: list[dict[str, Any]]) -> Delta | None:
     if not nodes:
         return None
 
-    session = _session(path, records, nodes)
+    session = _session(path, records, nodes, agent)
     branch_points = _branch_points(nodes)
     active = _active_branch(records, nodes)
 
@@ -173,17 +185,22 @@ def parse(path: Path, records: list[dict[str, Any]]) -> Delta | None:
     _measure(session, nodes, active, dag, compactions)
 
     return Delta(
-        session=session, nodes=dag, edges=_edges(session.id, records), compactions=compactions
+        session=session,
+        nodes=dag,
+        edges=_edges(session.id, records, agent),
+        compactions=compactions,
     )
 
 
-def _session(path: Path, records: list[dict[str, Any]], nodes: list[dict[str, Any]]) -> Session:
+def _session(
+    path: Path, records: list[dict[str, Any]], nodes: list[dict[str, Any]], agent: str
+) -> Session:
     first, last = nodes[0], nodes[-1]
     native_id = first.get("sessionId") or path.stem
     state = _sidecar_state(records)
     return Session(
-        id=f"claude:{native_id}",
-        agent="claude",
+        id=f"{agent}:{native_id}",
+        agent=agent,
         native_id=native_id,
         path=str(path),
         cwd=state.get("relocatedCwd") or first.get("cwd"),
@@ -336,14 +353,14 @@ def _compactions(session_id: str, records: list[dict[str, Any]]) -> list[Compact
     return out
 
 
-def _edges(session_id: str, records: list[dict[str, Any]]) -> list[Edge]:
+def _edges(session_id: str, records: list[dict[str, Any]], agent: str) -> list[Edge]:
     """A fork reuses the parent's message uuid as its own root, so the splice is exact."""
     for record in records:
         if fork := record.get("forkedFrom"):
             return [
                 Edge(
                     child=session_id,
-                    parent=f"claude:{fork['sessionId']}",
+                    parent=f"{agent}:{fork['sessionId']}",
                     kind="fork",
                     at_uuid=fork.get("messageUuid"),
                 )
@@ -635,10 +652,10 @@ def _read_bytes(path: Path) -> bytes:
     return path.read_bytes()
 
 
-SESSIONS_DIR = Path.home() / ".claude" / "sessions"
+SESSIONS = "sessions"
 
 
-def live(sessions_dir: Path = SESSIONS_DIR) -> dict[str, Running]:
+def live(sessions_dir: Path) -> dict[str, Running]:
     """Session id -> what is running it, for the sessions running right now.
 
     Claude keeps a file per process here. They outlive the process that wrote

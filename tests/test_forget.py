@@ -26,7 +26,6 @@ OTHER = "11111111-2222-3333-4444-555555555555"
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Everything this touches, pointed inside tmp_path."""
     monkeypatch.setattr(index.SOURCES["claude"], "root", tmp_path / "projects")
-    monkeypatch.setattr(claude, "HISTORY", tmp_path / "history.jsonl")
     monkeypatch.setattr(forget, "GRAVEYARD", tmp_path / "forgotten")
     monkeypatch.setattr(index.SOURCES["claude"], "live", dict)
     return tmp_path

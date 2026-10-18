@@ -3,6 +3,10 @@
 Indexes Claude Code sessions. Search, inspect, resume — from terminal, browser,
 or GitHub issue.
 
+Two Claude accounts are indexed: `~/.claude` (ids `claude:…`) and
+`~/.claude-personal` (ids `claude-personal:…`, resumed with `CLAUDE_CONFIG_DIR`
+set).
+
 
 ## Install
 
