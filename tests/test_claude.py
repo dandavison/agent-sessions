@@ -832,3 +832,51 @@ def test_the_recorded_leaf_still_decides_once_nothing_is_running(tmp_path: Path)
         last_prompt("a1"),
     ]
     assert "abandoned" not in [b.text for b in blocks(records) if isinstance(b, Said)]
+
+
+# --- a second account ------------------------------------------------------
+
+
+def personal(tmp_path: Path) -> ClaudeSource:
+    return ClaudeSource(tmp_path / ".claude-personal" / "projects", "claude-personal")
+
+
+def test_another_account_has_its_own_ids(tmp_path: Path) -> None:
+    """The same uuid in two accounts is two sessions."""
+    source = personal(tmp_path)
+    path = write(source.root, linear())
+    delta = source.ingest(path)
+    assert delta is not None
+    assert {d.id for d in source.discover()} == {f"claude-personal:{SESSION}"}
+    assert (delta.session.id, delta.session.agent) == (
+        f"claude-personal:{SESSION}",
+        "claude-personal",
+    )
+
+
+def test_another_account_is_resumed_in_its_own_config_dir(tmp_path: Path) -> None:
+    config = tmp_path / ".claude-personal"
+    assert (
+        personal(tmp_path).resume_command("7e90")
+        == f"env CLAUDE_CONFIG_DIR={config} claude -r 7e90"
+    )
+    assert personal(tmp_path).turn_command("7e90")[:3] == [
+        "env",
+        f"CLAUDE_CONFIG_DIR={config}",
+        "claude",
+    ]
+
+
+def test_another_account_reports_its_own_running_sessions(tmp_path: Path) -> None:
+    (tmp_path / ".claude-personal").mkdir()
+    write_registry(tmp_path / ".claude-personal", [{"pid": os.getpid(), "sessionId": "s1"}])
+    assert set(personal(tmp_path).live()) == {"s1"}
+
+
+def test_another_account_forgets_prompts_from_its_own_history(tmp_path: Path) -> None:
+    source = personal(tmp_path)
+    path = write(source.root, linear())
+    history = tmp_path / ".claude-personal" / "history.jsonl"
+    history.write_bytes(orjson.dumps({"display": "hi", "sessionId": SESSION}) + b"\n")
+    source.expunge(path, tmp_path / "forgotten")
+    assert history.read_bytes() == b""

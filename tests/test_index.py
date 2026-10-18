@@ -257,3 +257,22 @@ def test_what_was_said_stays_searchable_in_both(projects: Path, tmp_path: Path) 
 
     found = query.search(conn, "relocating", query.Filters(), 10)
     assert {f["id"] for f in found} == {f"claude:{SESSION}", f"claude:{OTHER}"}
+
+
+def test_the_personal_account_is_indexed() -> None:
+    assert index.SOURCES["claude-personal"].root == Path.home() / ".claude-personal" / "projects"
+
+
+def test_sessions_of_two_accounts_are_indexed_together(
+    projects: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    personal = tmp_path / ".claude-personal" / "projects"
+    monkeypatch.setitem(index.SOURCES, "claude-personal", ClaudeSource(personal, "claude-personal"))
+    write(projects, conversation())
+    write(personal, conversation())
+    conn = db.connect(tmp_path / "index.db")
+
+    index.sync(conn)
+
+    ids = {row["id"] for row in conn.execute("SELECT id FROM session")}
+    assert ids == {f"claude:{SESSION}", f"claude-personal:{SESSION}"}
